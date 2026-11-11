@@ -17,8 +17,8 @@ object Versions {
     const val defaultBuildTools = "36.1.0"
 
     // NOTE: increase this value to bump version code
-    // Ifboard 1.0.0
-    const val baseVersionCode = 100
+    // Ifboard 1.0.1
+    const val baseVersionCode = 101
     const val baseVersionName = "0.1.3"
 
     val supportedABIs = setOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
