@@ -1,0 +1,84 @@
+/*
+ * SPDX-License-Identifier: LGPL-2.1-or-later
+ * SPDX-FileCopyrightText: Copyright 2021-2023 Fcitx5 for Android Contributors
+ */
+package org.fcitx.fcitx5.android.input.bar.ui
+
+import android.content.Context
+import android.content.res.ColorStateList
+import android.view.ViewPropertyAnimator
+import android.widget.ImageView
+import androidx.annotation.ColorInt
+import androidx.annotation.DrawableRes
+import org.fcitx.fcitx5.android.data.prefs.AppPrefs
+import org.fcitx.fcitx5.android.data.theme.Theme
+import org.fcitx.fcitx5.android.input.keyboard.CustomGestureView
+import org.fcitx.fcitx5.android.utils.borderlessRippleDrawable
+import org.fcitx.fcitx5.android.utils.circlePressHighlightDrawable
+import splitties.dimensions.dp
+import splitties.views.dsl.core.add
+import splitties.views.dsl.core.imageView
+import splitties.views.dsl.core.lParams
+import splitties.views.dsl.core.wrapContent
+import splitties.views.gravityCenter
+import splitties.views.imageResource
+import splitties.views.padding
+
+class ToolButton(context: Context) : CustomGestureView(context) {
+
+    companion object {
+        val disableAnimation by AppPrefs.getInstance().advanced.disableAnimation
+    }
+
+    private val image = imageView {
+        isClickable = false
+        isFocusable = false
+        padding = dp(8)
+        scaleType = ImageView.ScaleType.CENTER_INSIDE
+    }
+
+    var iconRotation: Float
+        get() = image.rotation
+        set(value) {
+            image.rotation = value
+        }
+
+    constructor(context: Context, @DrawableRes icon: Int, theme: Theme) : this(context) {
+        image.imageTintList = ColorStateList.valueOf(theme.keyTextColor)
+        setIcon(icon)
+        setPressHighlightColor(theme.keyPressHighlightColor)
+        add(image, lParams(wrapContent, wrapContent, gravityCenter))
+    }
+
+    fun iconAnimate(): ViewPropertyAnimator = image.animate()
+
+    fun setCircleBackground(@ColorInt color: Int?) {
+        if (color == null) {
+            image.background = null
+            image.padding = dp(8)
+            image.translationX = 0f
+            image.layoutParams = image.layoutParams.apply { width = wrapContent; height = wrapContent }
+        } else {
+            image.background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.OVAL
+                setColor(color)
+            }
+            // Gboard: 34dp circle, centered slightly left of the button slot
+            image.padding = dp(5)
+            image.layoutParams = image.layoutParams.apply { width = dp(34); height = dp(34) }
+            image.translationX = -dp(1).toFloat()
+        }
+    }
+
+    fun setIcon(@DrawableRes icon: Int) {
+        image.imageResource = icon
+    }
+
+    fun setPressHighlightColor(@ColorInt color: Int) {
+        background = if (disableAnimation) {
+            circlePressHighlightDrawable(color)
+        } else {
+            borderlessRippleDrawable(color, dp(20))
+        }
+    }
+}

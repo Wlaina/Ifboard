@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <style name="Theme.FcitxAppTheme" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- Ifboard "warm paper": warm neutrals, one terracotta accent -->
+        <item name="colorPrimary">#FFD97757</item>
+        <item name="colorOnPrimary">#FFFFFFFF</item>
+        <item name="colorPrimaryContainer">#FF3D2A22</item>
+        <item name="colorOnPrimaryContainer">#FFF6DFD5</item>
+        <item name="colorSecondary">#FFC6613F</item>
+        <item name="colorSecondaryContainer">#FF3D2A22</item>
+        <item name="colorOnSecondaryContainer">#FFF6DFD5</item>
+        <item name="colorTertiary">#FF7D8B6A</item>
+        <item name="colorError">#FFB53333</item>
+        <item name="colorSurface">#FF141413</item>
+        <item name="colorOnSurface">#FFFAF9F5</item>
+        <item name="colorOnSurfaceVariant">#FFC2C0B6</item>
+        <item name="colorSurfaceContainerLowest">#FF252523</item>
+        <item name="colorSurfaceContainerLow">#FF252523</item>
+        <item name="colorSurfaceContainer">#FF141413</item>
+        <item name="colorSurfaceContainerHigh">#FF2E2E2B</item>
+        <item name="colorSurfaceContainerHighest">#FF2E2E2B</item>
+        <item name="colorOutline">#FF3D3D3A</item>
+        <item name="colorOutlineVariant">#FF30302E</item>
+        <item name="android:colorBackground">#FF141413</item>
+        <item name="android:windowBackground">@color/ifb_canvas</item>
+        <item name="android:textColorPrimary">#FFFAF9F5</item>
+        <item name="android:textColorSecondary">#FFC2C0B6</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="colorLogFatal">@color/red_A700</item>
+        <item name="colorLogError">@color/red_400</item>
+        <item name="colorLogWarning">@color/yellow_500</item>
+        <item name="colorLogInfo">@color/blue_500</item>
+        <item name="colorLogDebug">@color/grey_400</item>
+        <item name="colorLogVerbose">@color/grey_400</item>
+    </style>
+
+    <style name="Theme.DialogTheme" parent="@android:style/Theme.DeviceDefault.Dialog" />
+
+    <style name="InputViewSnackbarTheme" parent="Theme.MaterialComponents.DayNight.NoActionBar" />
+</resources>
