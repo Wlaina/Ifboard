@@ -462,10 +462,42 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             idleUi.inlineSuggestionsBar.clear()
         }
+        lastCapFlags = capFlags
+        // Ifboard: these lookups are several binder calls; doing them on every keyboard show delayed the
+        // first frame. Use cached results and refresh them in background.
+        if (builtinVoiceCached == null) refreshVoiceAvailabilityNow()
+        applyVoiceButton(capFlags)
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - voiceCheckedAt > VoiceRecheckMillis) {
+            voiceCheckedAt = now
+            service.lifecycleScope.launch(kotlinx.coroutines.Dispatchers.Default) {
+                val builtin = VoiceInputWindow.isAvailable(service)
+                val subtype = InputMethodUtil.findVoiceSubtype(preferredVoiceInput)
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    val changed = builtin != builtinVoiceCached || (subtype == null) != (voiceInputSubtype == null)
+                    builtinVoiceCached = builtin
+                    voiceInputSubtype = subtype
+                    if (changed) lastCapFlags?.let { applyVoiceButton(it) }
+                }
+            }
+        }
+        evalIdleUiState()
+    }
+
+    private var builtinVoiceCached: Boolean? = null
+    private var voiceCheckedAt = 0L
+    private var lastCapFlags: CapabilityFlags? = null
+
+    private fun refreshVoiceAvailabilityNow() {
+        builtinVoiceCached = VoiceInputWindow.isAvailable(service)
         voiceInputSubtype = InputMethodUtil.findVoiceSubtype(preferredVoiceInput)
+        voiceCheckedAt = android.os.SystemClock.uptimeMillis()
+    }
+
+    private fun applyVoiceButton(capFlags: CapabilityFlags) {
         // Gboard style: voice typing inside the keyboard via system SpeechRecognizer;
         // fall back to switching to a voice IME when no recognition service exists
-        val builtinVoice = VoiceInputWindow.isAvailable(service)
+        val builtinVoice = builtinVoiceCached == true
         val shouldShowVoiceInput = showVoiceInputButton && !capFlags.has(CapabilityFlag.Password) &&
                 (builtinVoice || voiceInputSubtype != null)
         idleUi.setHideKeyboardIsVoiceInput(
@@ -476,7 +508,6 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
                 else -> switchToVoiceInputCallback
             }
         )
-        evalIdleUiState()
     }
 
     override fun onPreeditEmptyStateUpdate(empty: Boolean) {
@@ -585,6 +616,7 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
     }
 
     companion object {
+        private const val VoiceRecheckMillis = 15_000L
         const val HEIGHT = 40
     }
 

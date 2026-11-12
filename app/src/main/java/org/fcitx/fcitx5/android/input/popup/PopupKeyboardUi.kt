@@ -214,9 +214,11 @@ class PopupKeyboardUi(
             textView.animate().cancel()
             root.animate().cancel()
             if (animate) {
-                root.scaleX = 0.7f
-                root.scaleY = 0.7f
-                root.animate().scaleX(1f).scaleY(1f).setDuration(200).setInterpolator(focusInterpolator).start()
+                // the highlight grows to its final size without overshooting, so the row never clips it
+                root.scaleX = 0.6f
+                root.scaleY = 0.6f
+                root.animate().scaleX(1f).scaleY(1f).setDuration(180)
+                    .setInterpolator(android.view.animation.DecelerateInterpolator(2f)).start()
                 textView.animate().scaleX(FocusScale).scaleY(FocusScale).translationY(-ctx.dp(2f))
                     .setDuration(200).setInterpolator(focusInterpolator).start()
             } else {

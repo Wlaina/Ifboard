@@ -218,6 +218,51 @@ class KeyboardWindow : InputWindow.SimpleInputWindow<KeyboardWindow>(), Essentia
         private var previewing: KeyView? = null
         private val threshold = ctx.resources.displayMetrics.density * 12
 
+        // Gboard: a thick rounded line follows the finger from where "?123" was pressed
+        private val linePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            style = android.graphics.Paint.Style.STROKE
+            strokeCap = android.graphics.Paint.Cap.ROUND
+            strokeWidth = ctx.resources.displayMetrics.density * 5f
+            color = theme.genericActiveBackgroundColor or 0xFF000000.toInt()
+        }
+        private var lineAlpha = 0f
+        private var lineFade: android.animation.ValueAnimator? = null
+        private val loc = IntArray(2)
+        private var lineX0 = 0f
+        private var lineY0 = 0f
+        private var lineX1 = 0f
+        private var lineY1 = 0f
+
+        init {
+            setWillNotDraw(false)
+        }
+
+        private fun lineTo(rawX: Float, rawY: Float) {
+            getLocationOnScreen(loc)
+            lineX1 = rawX - loc[0]
+            lineY1 = rawY - loc[1]
+            lineFade?.cancel()
+            lineAlpha = 1f
+            invalidate()
+        }
+
+        private fun fadeLine() {
+            if (lineAlpha <= 0f) return
+            lineFade?.cancel()
+            lineFade = android.animation.ValueAnimator.ofFloat(lineAlpha, 0f).apply {
+                duration = 140
+                addUpdateListener { lineAlpha = it.animatedValue as Float; invalidate() }
+                start()
+            }
+        }
+
+        override fun dispatchDraw(canvas: android.graphics.Canvas) {
+            super.dispatchDraw(canvas)
+            if (lineAlpha <= 0f) return
+            linePaint.alpha = (235 * lineAlpha).toInt()
+            canvas.drawLine(lineX0, lineY0, lineX1, lineY1, linePaint)
+        }
+
         private fun setPreview(kb: BaseKeyboard?, v: KeyView?) {
             if (v === previewing) return
             previewing?.let { kb?.dismissSlidePreview(it); it.isPressed = false }
@@ -236,6 +281,9 @@ class KeyboardWindow : InputWindow.SimpleInputWindow<KeyboardWindow>(), Essentia
                         moved = false
                         downX = ev.rawX
                         downY = ev.rawY
+                        getLocationOnScreen(loc)
+                        lineX0 = ev.rawX - loc[0]
+                        lineY0 = ev.rawY - loc[1]
                         org.fcitx.fcitx5.android.data.InputFeedbacks.hapticFeedback(hit.first)
                         switchLayout(GboardSymbolKeyboard.Page1Name)
                         return true
@@ -244,6 +292,7 @@ class KeyboardWindow : InputWindow.SimpleInputWindow<KeyboardWindow>(), Essentia
                 android.view.MotionEvent.ACTION_MOVE -> if (sliding) {
                     if (!moved && kotlin.math.hypot(ev.rawX - downX, ev.rawY - downY) > threshold) moved = true
                     if (moved) {
+                        lineTo(ev.rawX, ev.rawY)
                         val kb = currentKeyboard
                         val hit = kb?.findKeyAt(ev.rawX, ev.rawY)
                         setPreview(kb, hit?.takeIf { it.second is KeyAction.CommitAction }?.first)
@@ -252,6 +301,7 @@ class KeyboardWindow : InputWindow.SimpleInputWindow<KeyboardWindow>(), Essentia
                 }
                 android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> if (sliding) {
                     sliding = false
+                    fadeLine()
                     val kb = currentKeyboard
                     setPreview(kb, null)
                     if (moved && ev.actionMasked == android.view.MotionEvent.ACTION_UP) {

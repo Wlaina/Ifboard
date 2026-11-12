@@ -422,13 +422,16 @@ abstract class BaseKeyboard(
     private val glideRect = Rect()
     private val glideSlop = ViewConfiguration.get(context).scaledTouchSlop
     private var trailVisible = false
-    private val trailWidth = dp(7f)
+    private val trailWidth = dp(6.5f)
     private val trailPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.ROUND
-        color = theme.accentKeyBackgroundColor
+        style = Paint.Style.FILL
+        // same accent as the long-press focus circle: clearly visible on light and dark themes
+        color = theme.genericActiveBackgroundColor or 0xFF000000.toInt()
     }
-    private val trailAlpha = if (theme.isDark) 150 else 120
+    private val trailAlpha = 190
+    private val trailPath = android.graphics.Path()
+    private var trailL = FloatArray(512)
+    private var trailR = FloatArray(512)
 
     private fun keyRectOf(v: View, out: Rect) {
         out.set(0, 0, v.width, v.height)
@@ -601,18 +604,47 @@ abstract class BaseKeyboard(
         super.dispatchDraw(canvas)
         if (!trailVisible || glideN < 2) return
         val now = SystemClock.uptimeMillis()
-        var alive = false
-        val xy = glideXY
-        for (i in 1 until glideN) {
-            val age = now - glideT[i]
-            if (age >= TrailMillis) continue
-            alive = true
-            val f = 1f - age.toFloat() / TrailMillis
-            trailPaint.strokeWidth = trailWidth * (0.3f + 0.7f * f)
-            trailPaint.alpha = (trailAlpha * f).toInt()
-            canvas.drawLine(xy[2 * i - 2], xy[2 * i - 1], xy[2 * i], xy[2 * i + 1], trailPaint)
+        // first point that is still visible
+        var first = glideN
+        for (i in 0 until glideN) if (now - glideT[i] < TrailMillis) { first = i; break }
+        val count = glideN - first
+        if (count < 2) {
+            if (glideState != GlideState.Gliding) trailVisible = false
+            else postInvalidateOnAnimation()
+            return
         }
-        if (alive) postInvalidateOnAnimation() else if (glideState != GlideState.Gliding) trailVisible = false
+        if (trailL.size < 2 * count) {
+            trailL = FloatArray(4 * count); trailR = FloatArray(4 * count)
+        }
+        val xy = glideXY
+        // a tapered ribbon: offset every point along its normal by half of its width (older = thinner)
+        for (k in 0 until count) {
+            val i = first + k
+            val a = maxOf(i - 1, first)
+            val b = minOf(i + 1, glideN - 1)
+            var nx = -(xy[2 * b + 1] - xy[2 * a + 1])
+            var ny = xy[2 * b] - xy[2 * a]
+            val len = hypot(nx, ny)
+            if (len > 0f) { nx /= len; ny /= len } else { nx = 0f; ny = 0f }
+            val f = 1f - (now - glideT[i]).toFloat() / TrailMillis
+            val half = trailWidth * 0.5f * f.coerceIn(0f, 1f)
+            trailL[2 * k] = xy[2 * i] + nx * half; trailL[2 * k + 1] = xy[2 * i + 1] + ny * half
+            trailR[2 * k] = xy[2 * i] - nx * half; trailR[2 * k + 1] = xy[2 * i + 1] - ny * half
+        }
+        trailPath.rewind()
+        trailPath.moveTo(trailL[0], trailL[1])
+        for (k in 1 until count) trailPath.lineTo(trailL[2 * k], trailL[2 * k + 1])
+        for (k in count - 1 downTo 0) trailPath.lineTo(trailR[2 * k], trailR[2 * k + 1])
+        trailPath.close()
+        val hx = xy[2 * glideN - 2]
+        val hy = xy[2 * glideN - 1]
+        val headF = (1f - (now - glideT[glideN - 1]).toFloat() / TrailMillis).coerceIn(0f, 1f)
+        // draw everything opaque into one layer, then apply the alpha once: no darker joints
+        val save = canvas.saveLayerAlpha(0f, 0f, width.toFloat(), height.toFloat(), trailAlpha)
+        canvas.drawPath(trailPath, trailPaint)
+        canvas.drawCircle(hx, hy, trailWidth * 0.5f * headF, trailPaint)
+        canvas.restoreToCount(save)
+        postInvalidateOnAnimation()
     }
 
     companion object {

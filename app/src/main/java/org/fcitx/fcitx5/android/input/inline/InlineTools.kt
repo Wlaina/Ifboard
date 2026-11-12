@@ -191,19 +191,59 @@ class TranslatePanel(
             if (service.textInterceptor === this) service.textInterceptor = null
             job?.cancel()
         }
-        root.animate().cancel()
-        if (on) {
-            root.visibility = View.VISIBLE
-            root.alpha = 0f
-            root.translationY = ctx.dpf(10f)
-            root.animate().alpha(1f).translationY(0f).setDuration(220)
-                .setInterpolator(android.view.animation.DecelerateInterpolator(2f)).start()
-        } else {
-            root.animate().alpha(0f).setDuration(120)
-                .withEndAction { if (!active) root.visibility = View.GONE }.start()
-        }
+        animateExpand(on)
         updateInput()
         onActiveChanged?.invoke(on)
+    }
+
+    private var heightAnimator: android.animation.ValueAnimator? = null
+
+    /** grow / shrink the panel height together with a fade, so the keyboard below moves smoothly both ways */
+    private fun animateExpand(on: Boolean) {
+        heightAnimator?.cancel()
+        root.animate().cancel()
+        val lp = root.layoutParams
+        val parentWidth = (root.parent as? View)?.width ?: 0
+        if (lp == null || parentWidth == 0) {
+            root.visibility = if (on) View.VISIBLE else View.GONE
+            root.alpha = 1f
+            return
+        }
+        val wasVisible = root.visibility == View.VISIBLE
+        val from = if (wasVisible) root.height else 0
+        val a0 = if (wasVisible) root.alpha else 0f
+        val to = if (on) {
+            root.measure(
+                View.MeasureSpec.makeMeasureSpec(parentWidth, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+            )
+            root.measuredHeight
+        } else 0
+        root.visibility = View.VISIBLE
+        lp.height = from
+        root.layoutParams = lp
+        heightAnimator = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = if (on) 240 else 200
+            interpolator = android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f)
+            addUpdateListener {
+                val t = it.animatedValue as Float
+                lp.height = (from + (to - from) * t).toInt()
+                root.layoutParams = lp
+                root.alpha = if (on) a0 + (1f - a0) * t else a0 * (1f - t)
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                private var cancelled = false
+                override fun onAnimationCancel(animation: android.animation.Animator) { cancelled = true }
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    if (cancelled) return
+                    lp.height = android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+                    root.layoutParams = lp
+                    root.alpha = 1f
+                    if (!active) root.visibility = View.GONE
+                }
+            })
+            start()
+        }
     }
 
     private fun updateInput() {
@@ -337,7 +377,8 @@ class VoiceBar(
     val root: View = FrameLayout(ctx).apply {
         visibility = View.GONE
         isClickable = true
-        setBackgroundColor(theme.barColor)
+        // transparent: the toolbar underneath is hidden while listening, so this shows exactly the keyboard background
+        setBackgroundColor(android.graphics.Color.TRANSPARENT)
         addView(back, FrameLayout.LayoutParams(ctx.dpi(48), -1, Gravity.START))
         addView(status, FrameLayout.LayoutParams(-1, -1).apply {
             leftMargin = ctx.dpi(56); rightMargin = ctx.dpi(56)

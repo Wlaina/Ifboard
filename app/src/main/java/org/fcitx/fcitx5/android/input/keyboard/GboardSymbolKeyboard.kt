@@ -72,17 +72,35 @@ class GboardSymbolKeyboard(
                 .filter { it.mainText.text.toString() == "12\n34" }
                 .forEach { key ->
                     key.mainText.visibility = android.view.View.INVISIBLE
-                    key.addView(android.widget.TextView(context).apply {
-                        text = "12\n34"
-                        textSize = 12f
-                        gravity = android.view.Gravity.CENTER
-                        setLineSpacing(0f, 0.9f)
-                        setTextColor(theme.keyTextColor)
-                        GboardFont.get(context)?.let { typeface = it }
+                    key.addView(DigitGridView(context, theme.keyTextColor).apply {
                         isClickable = false
                         isFocusable = false
                     }, android.widget.FrameLayout.LayoutParams(-2, -2, android.view.Gravity.CENTER))
                 }
+        }
+    }
+
+    /** Gboard's "1 2 / 3 4" label: every digit centered in its own cell of a tight 2x2 grid */
+    private class DigitGridView(context: android.content.Context, color: Int) : android.view.View(context) {
+        private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            this.color = color
+            textSize = 12.5f * context.resources.displayMetrics.scaledDensity
+            textAlign = android.graphics.Paint.Align.CENTER
+            GboardFont.get(context)?.let { typeface = it }
+        }
+        private val cellW = paint.textSize * 0.68f
+        private val cellH = paint.textSize * 1.08f
+
+        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) =
+            setMeasuredDimension((cellW * 2).toInt() + 2, (cellH * 2).toInt() + 2)
+
+        override fun onDraw(canvas: android.graphics.Canvas) {
+            val baseline = -(paint.ascent() + paint.descent()) / 2f
+            val x0 = width / 2f - cellW / 2f
+            val y0 = height / 2f - cellH / 2f
+            "1234".forEachIndexed { i, c ->
+                canvas.drawText(c.toString(), x0 + (i % 2) * cellW, y0 + (i / 2) * cellH + baseline, paint)
+            }
         }
     }
 

@@ -115,7 +115,6 @@ class InputView(
         if (Glass.applyBackgroundBlur(keyboardView, theme.backgroundColor, host = this)) {
             customBackground.alpha = 0f
             translatePanel.root.setBackgroundColor(Glass.tint(theme.barColor, 0.45f))
-            voiceBar.root.setBackgroundColor(Glass.tint(theme.barColor, 0.85f))
         }
     }
 

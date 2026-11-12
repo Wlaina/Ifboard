@@ -96,13 +96,13 @@ class PopupMenuUi(
             drawable?.setTint(focusTint)
             if (focusAnimate) {
                 animate().cancel()
-                scaleX = 0.75f
-                scaleY = 0.75f
-                animate().scaleX(1.12f).scaleY(1.12f).setDuration(200)
-                    .setInterpolator(android.view.animation.OvershootInterpolator(3f)).start()
+                scaleX = 0.7f
+                scaleY = 0.7f
+                animate().scaleX(1f).scaleY(1f).setDuration(180)
+                    .setInterpolator(android.view.animation.DecelerateInterpolator(2f)).start()
             } else {
-                scaleX = 1.12f
-                scaleY = 1.12f
+                scaleX = 1f
+                scaleY = 1f
             }
         }
         focusAnimate = true

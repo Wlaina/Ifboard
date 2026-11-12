@@ -24,25 +24,30 @@ cp -r "$RIME_ICE_DIR"/cn_dicts "$RIME_ICE_DIR"/en_dicts "$RIME_ICE_DIR"/lua "$RI
 cp "$RIME_ICE_DIR"/*.schema.yaml "$RIME_ICE_DIR"/*.dict.yaml "$RIME_ICE_DIR"/symbols_*.yaml \
    "$RIME_ICE_DIR"/default.yaml "$RIME_ICE_DIR"/recipe.yaml $R/
 [ -f "$RIME_ICE_DIR/wanxiang-lts-zh-hans.gram" ] && cp "$RIME_ICE_DIR/wanxiang-lts-zh-hans.gram" $R/
-# 3. personal setup (first-run import)
+# the full pinyin schema (雾凇拼音) must always be there: fall back to rime-ice's own no-lua copy
+if [ ! -f "$R/rime_ice.schema.yaml" ]; then
+  cp "$RIME_ICE_DIR/others/no_lua_schema/rime_ice.schema.yaml" $R/ || { echo "rime_ice.schema.yaml not found" >&2; exit 1; }
+fi
+# 3. first-run import
 U=$A/ifboard
 rm -rf $U; mkdir -p $U/rime/sync $U/config/conf
-cp "$RESTORE_DIR/Android/double_pinyin_flypy.custom.yaml" "$RESTORE_DIR/default.custom.yaml" $U/rime/
-if [ "${INCLUDE_USERDB:-1}" != "1" ]; then
-  # public release: new users start with full pinyin (雾凇拼音); 小鹤双拼 stays available in the schema list
-  sed -i 's/^\( *\)- schema: double_pinyin_flypy.*$/\1- schema: rime_ice  # 雾凇拼音 - 全拼\n\1- schema: double_pinyin_flypy  # 雾凇拼音 - 小鹤双拼/' $U/rime/default.custom.yaml
-  grep -q "schema: rime_ice" $U/rime/default.custom.yaml || { echo "default.custom.yaml: schema_list not patched" >&2; exit 1; }
-  # same grammar model for full pinyin as the double pinyin setup
+if [ "${INCLUDE_USERDB:-1}" = "1" ]; then
+  # local build: my own setup (小鹤双拼 + fuzzy pinyin, key bindings, custom phrases, typing history)
+  cp "$RESTORE_DIR/Android/double_pinyin_flypy.custom.yaml" "$RESTORE_DIR/default.custom.yaml" $U/rime/
+  cp "$RIME_ICE_DIR"/custom_phrase*.txt $U/rime/
+  for d in "$SYNC_DIR"/PC-*; do [ -f "$d/rime_ice.userdb.txt" ] && mkdir -p "$U/rime/sync/$(basename "$d")" && cp "$d/rime_ice.userdb.txt" "$U/rime/sync/$(basename "$d")/"; done
+else
+  # public release: plain rime-ice defaults (full pinyin first, no fuzzy pinyin, no personal phrases / history);
+  # the only addition is the bundled grammar model, for both schemas
   if [ -f "$RIME_ICE_DIR/wanxiang-lts-zh-hans.gram" ]; then
-    printf '%s\n' 'patch:' '  grammar:' '    language: wanxiang-lts-zh-hans' '    collocation_max_length: 6' \
-      '    collocation_min_length: 3' '    collocation_penalty: -14' '    non_collocation_penalty: -6' \
-      '    weak_collocation_penalty: -100' '    rear_penalty: -20' '  translator/contextual_suggestions: false' \
-      '  translator/max_homophones: 8' > $U/rime/rime_ice.custom.yaml
+    for s in rime_ice double_pinyin_flypy; do
+      printf '%s\n' 'patch:' '  grammar:' '    language: wanxiang-lts-zh-hans' '    collocation_max_length: 6' \
+        '    collocation_min_length: 3' '    collocation_penalty: -14' '    non_collocation_penalty: -6' \
+        '    weak_collocation_penalty: -100' '    rear_penalty: -20' '  translator/contextual_suggestions: false' \
+        '  translator/max_homophones: 8' > $U/rime/$s.custom.yaml
+    done
   fi
 fi
-cp "$RIME_ICE_DIR"/custom_phrase*.txt $U/rime/
-# personal typing history only goes into local builds (INCLUDE_USERDB=0 for public releases)
-[ "${INCLUDE_USERDB:-1}" = "1" ] && for d in "$SYNC_DIR"/PC-*; do [ -f "$d/rime_ice.userdb.txt" ] && mkdir -p "$U/rime/sync/$(basename "$d")" && cp "$d/rime_ice.userdb.txt" "$U/rime/sync/$(basename "$d")/"; done
 cp "$RESTORE_DIR/Android/fcitx5_profile" $U/config/profile
 cp "$RESTORE_DIR/Android/fcitx5_config" $U/config/config
 printf 'EnableWordHint=True\nPageSize=5\nInsertSpace=True\n' > $U/config/conf/androidkeyboard.conf
