@@ -10,6 +10,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.preference.EditTextPreference
 import androidx.preference.EditTextPreferenceDialogFragmentCompat
 import org.fcitx.fcitx5.android.R
+import org.fcitx.fcitx5.android.ui.common.WarmPaperUi
 
 class MyEditTextPreferenceDialogFragment : EditTextPreferenceDialogFragmentCompat() {
     override fun onPrepareDialogBuilder(builder: AlertDialog.Builder) {
@@ -23,6 +24,11 @@ class MyEditTextPreferenceDialogFragment : EditTextPreferenceDialogFragmentCompa
     override fun onBindDialogView(view: View) {
         super.onBindDialogView(view)
         fixDialogMargin(view)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        (dialog as? AlertDialog)?.let { WarmPaperUi.styleAlertDialog(it) }
     }
 
     companion object {

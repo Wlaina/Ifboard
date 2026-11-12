@@ -51,7 +51,12 @@ class PopupMenuUi(
         calcInitialFocusedColumn(columnCount, keySize, outerBounds, triggerBounds)
 
     override val offsetX = ((triggerBounds.width() - keySize) / 2) - (keySize * focusColumn)
-    override val offsetY = ctx.dp(-52)
+    private val aboveOffsetY = ctx.dp(-52)
+    override val offsetY = if (triggerBounds.top + aboveOffsetY >= outerBounds.top) {
+        aboveOffsetY
+    } else {
+        triggerBounds.height() + ctx.dp(4)
+    }
 
     private val columnOrder = createColumnOrder(columnCount, focusColumn)
 

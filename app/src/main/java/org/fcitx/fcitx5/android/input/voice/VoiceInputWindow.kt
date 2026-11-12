@@ -170,7 +170,7 @@ class VoiceInputWindow : InputWindow.ExtendedInputWindow<VoiceInputWindow>() {
             != PackageManager.PERMISSION_GRANTED
         ) {
             statusText.text = "需要麦克风权限"
-            hintText.text = "请在系统设置中允许小企鹅输入法使用麦克风"
+            hintText.text = "请在系统设置中允许 Ifboard 使用麦克风"
             return
         }
         val r = recognizer ?: SpeechRecognizer.createSpeechRecognizer(service).also {

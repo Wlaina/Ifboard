@@ -9,15 +9,19 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.view.MotionEvent
+import android.view.View
 import android.view.ViewGroup
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.appcompat.graphics.drawable.DrawerArrowDrawable
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.doOnLayout
 import androidx.core.view.updateLayoutParams
+import androidx.fragment.app.Fragment
+import androidx.fragment.app.FragmentManager
 import androidx.navigation.NavController
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.fragment.NavHostFragment
@@ -25,12 +29,15 @@ import org.fcitx.fcitx5.android.BuildConfig
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.data.prefs.AppPrefs
 import org.fcitx.fcitx5.android.databinding.ActivityMainBinding
+import org.fcitx.fcitx5.android.ui.common.MonetBackgroundView
+import org.fcitx.fcitx5.android.ui.common.PaddingPreferenceFragment
+import org.fcitx.fcitx5.android.ui.common.WarmPaperUi
+import org.fcitx.fcitx5.android.ui.common.showWarm
 import org.fcitx.fcitx5.android.ui.main.settings.SettingsRoute
 import org.fcitx.fcitx5.android.ui.setup.SetupActivity
 import org.fcitx.fcitx5.android.utils.navigateWithAnim
 import org.fcitx.fcitx5.android.utils.parcelable
 import org.fcitx.fcitx5.android.utils.startActivity
-import splitties.dimensions.dp
 import splitties.views.topPadding
 
 class MainActivity : AppCompatActivity() {
@@ -39,10 +46,23 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var navController: NavController
 
+    private var monetBg: MonetBackgroundView? = null
+    private lateinit var toolbarView: androidx.appcompat.widget.Toolbar
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> monetBg?.pauseTemporarily()
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        WarmPaperUi.applySystemBars(this)
         val binding = ActivityMainBinding.inflate(layoutInflater)
+        monetBg = binding.monetBg
+        toolbarView = binding.toolbar
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, windowInsets ->
             val statusBars = windowInsets.getInsets(WindowInsetsCompat.Type.statusBars())
             val navBars = windowInsets.getInsets(WindowInsetsCompat.Type.navigationBars())
@@ -55,9 +75,30 @@ class MainActivity : AppCompatActivity() {
         }
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
+        WarmPaperUi.styleGlassToolbar(binding.toolbar)
         // always show toolbar back arrow icon
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        navController = binding.navHostFragment.getFragment<NavHostFragment>().navController
+        val navHost = binding.navHostFragment.getFragment<NavHostFragment>()
+        navController = navHost.navController
+        navHost.childFragmentManager.registerFragmentLifecycleCallbacks(
+            object : FragmentManager.FragmentLifecycleCallbacks() {
+                override fun onFragmentViewCreated(
+                    fm: FragmentManager,
+                    f: Fragment,
+                    v: View,
+                    savedInstanceState: Bundle?
+                ) {
+                    if (f !is PaddingPreferenceFragment && f.parentFragment === navHost) {
+                        val applyTop = {
+                            val h = toolbarView.height
+                            if (h > 0) v.topPadding = h
+                        }
+                        if (toolbarView.height > 0) applyTop() else toolbarView.doOnLayout { applyTop() }
+                    }
+                }
+            },
+            false
+        )
         navController.graph = SettingsRoute.createGraph(navController)
         viewModel.toolbarTitle.observe(this) {
             supportActionBar!!.title = it
@@ -122,7 +163,8 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton("暂不") { _, _ -> }
             .setOnDismissListener { sp.edit().putBoolean(gm.PREF_ASKED, true).apply() }
-            .show()
+            .create()
+            .showWarm()
     }
 
     private var bgStartDialog: androidx.appcompat.app.AlertDialog? = null
@@ -142,7 +184,8 @@ class MainActivity : AppCompatActivity() {
             )
             .setPositiveButton("去开启") { _, _ -> bg.openPermissionPage(this) }
             .setNegativeButton("以后再说") { _, _ -> bg.snooze(this, version) }
-            .show()
+            .create()
+            .showWarm()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -175,7 +218,8 @@ class MainActivity : AppCompatActivity() {
                         navController.popBackStack(SettingsRoute.Index, false)
                         navController.navigateWithAnim(SettingsRoute.PinyinDict(it))
                     }
-                    .show()
+                    .create()
+                    .showWarm()
             }
             Intent.ACTION_RUN -> {
                 val route = intent.parcelable<SettingsRoute>(EXTRA_SETTINGS_ROUTE) ?: return
@@ -209,7 +253,8 @@ class MainActivity : AppCompatActivity() {
                 .setPositiveButton(R.string.grant_permission) { _, _ ->
                     requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 0)
                 }
-                .show()
+                .create()
+                .showWarm()
         }
     }
 

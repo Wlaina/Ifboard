@@ -10,6 +10,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
+import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
@@ -19,12 +20,16 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.text.TextUtils
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
+import android.view.animation.AccelerateInterpolator
+import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.content.ContextCompat
+import androidx.core.view.OneShotPreDrawListener
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -32,9 +37,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.fcitx.fcitx5.android.R
+import org.fcitx.fcitx5.android.data.InputFeedbacks
 import org.fcitx.fcitx5.android.data.theme.Theme
 import org.fcitx.fcitx5.android.input.FcitxInputMethodService
 import org.fcitx.fcitx5.android.input.keyboard.GboardFont
+import org.fcitx.fcitx5.android.input.popup.PopupAction
+import org.fcitx.fcitx5.android.input.popup.PopupActionListener
 import org.json.JSONArray
 import timber.log.Timber
 import java.net.HttpURLConnection
@@ -91,6 +99,7 @@ class TranslatePanel(
         private set
 
     var onActiveChanged: ((Boolean) -> Unit)? = null
+    var popupListener: PopupActionListener? = null
 
     private fun name(code: String) = langs.firstOrNull { it.code == code }?.name ?: code
 
@@ -155,7 +164,70 @@ class TranslatePanel(
     init {
         srcButton.setOnClickListener { src = next(src, allowSame = false); save(); retranslate() }
         dstButton.setOnClickListener { dst = next(dst, allowSame = false); save(); retranslate() }
+        attachLangSlidePicker(srcButton, { src }) { picked ->
+            if (picked == dst) swap() else { src = picked; save(); retranslate() }
+        }
+        attachLangSlidePicker(dstButton, { dst }) { picked ->
+            if (picked == src) swap() else { dst = picked; save(); retranslate() }
+        }
         refreshLabels()
+    }
+
+    /** 长按语言胶囊弹出竖向列表，上下滑动切换语言（复用按键长按气泡动画） */
+    private fun attachLangSlidePicker(btn: TextView, currentCode: () -> String, onPicked: (String) -> Unit) {
+        val viewId = View.generateViewId().also { btn.id = it }
+        var menuShown = false
+        var menuWasShown = false
+        val triggerRect = Rect()
+        val loc = intArrayOf(0, 0)
+        btn.setOnLongClickListener { v ->
+            val listener = popupListener ?: return@setOnLongClickListener false
+            v.getLocationInWindow(loc)
+            triggerRect.set(loc[0], loc[1], loc[0] + v.width, loc[1] + v.height)
+            menuShown = true
+            menuWasShown = true
+            v.parent?.requestDisallowInterceptTouchEvent(true)
+            InputFeedbacks.hapticFeedback(v)
+            val idx = langs.indexOfFirst { it.code == currentCode() }.coerceAtLeast(0)
+            listener.onPopupAction(
+                PopupAction.ShowChoiceAction(viewId, langs.map { it.name }, triggerRect, idx) { pickedIdx ->
+                    langs.getOrNull(pickedIdx)?.code?.let(onPicked)
+                }
+            )
+            true
+        }
+        btn.setOnTouchListener { v, event ->
+            val listener = popupListener ?: return@setOnTouchListener false
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    menuShown = false
+                    menuWasShown = false
+                    false
+                }
+                MotionEvent.ACTION_MOVE -> if (menuShown) {
+                    val dismissed = PopupAction.ChangeFocusAction(viewId, event.x, event.y)
+                        .also { listener.onPopupAction(it) }.outResult
+                    if (dismissed) menuShown = false
+                    true
+                } else false
+                MotionEvent.ACTION_UP -> if (menuWasShown) {
+                    if (menuShown) {
+                        PopupAction.TriggerAction(viewId).also { listener.onPopupAction(it) }
+                        listener.onPopupAction(PopupAction.DismissAction(viewId))
+                    }
+                    menuShown = false
+                    menuWasShown = false
+                    true
+                } else false
+                MotionEvent.ACTION_CANCEL -> if (menuWasShown) {
+                    if (menuShown) listener.onPopupAction(PopupAction.DismissAction(viewId))
+                    menuShown = false
+                    menuWasShown = false
+                    true
+                } else false
+                else -> false
+            }
+        }
     }
 
     private fun next(cur: String, allowSame: Boolean): String {
@@ -190,59 +262,58 @@ class TranslatePanel(
         } else {
             if (service.textInterceptor === this) service.textInterceptor = null
             job?.cancel()
+            popupListener?.apply {
+                onPopupAction(PopupAction.DismissAction(srcButton.id))
+                onPopupAction(PopupAction.DismissAction(dstButton.id))
+            }
         }
         animateExpand(on)
         updateInput()
         onActiveChanged?.invoke(on)
     }
 
-    private var heightAnimator: android.animation.ValueAnimator? = null
-
-    /** grow / shrink the panel height together with a fade, so the keyboard below moves smoothly both ways */
+    /** 仅动画属性合成（alpha/scaleY/translationY + GPU layer），避免逐帧改 height 引发 ConstraintLayout 全键盘重排卡顿 */
     private fun animateExpand(on: Boolean) {
-        heightAnimator?.cancel()
         root.animate().cancel()
-        val lp = root.layoutParams
-        val parentWidth = (root.parent as? View)?.width ?: 0
-        if (lp == null || parentWidth == 0) {
-            root.visibility = if (on) View.VISIBLE else View.GONE
-            root.alpha = 1f
-            return
-        }
-        val wasVisible = root.visibility == View.VISIBLE
-        val from = if (wasVisible) root.height else 0
-        val a0 = if (wasVisible) root.alpha else 0f
-        val to = if (on) {
-            root.measure(
-                View.MeasureSpec.makeMeasureSpec(parentWidth, View.MeasureSpec.EXACTLY),
-                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
-            )
-            root.measuredHeight
-        } else 0
-        root.visibility = View.VISIBLE
-        lp.height = from
-        root.layoutParams = lp
-        heightAnimator = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = if (on) 240 else 200
-            interpolator = android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f)
-            addUpdateListener {
-                val t = it.animatedValue as Float
-                lp.height = (from + (to - from) * t).toInt()
-                root.layoutParams = lp
-                root.alpha = if (on) a0 + (1f - a0) * t else a0 * (1f - t)
+        if (on) {
+            root.visibility = View.VISIBLE
+            root.alpha = 0f
+            OneShotPreDrawListener.add(root) {
+                val h = root.height.toFloat().coerceAtLeast(1f)
+                root.pivotX = root.width * 0.5f
+                root.pivotY = h
+                root.scaleY = 0.86f
+                root.translationY = ctx.dpf(10f)
+                root.animate()
+                    .alpha(1f)
+                    .scaleY(1f)
+                    .translationY(0f)
+                    .setDuration(190)
+                    .setInterpolator(DecelerateInterpolator(2f))
+                    .withLayer()
+                    .start()
             }
-            addListener(object : android.animation.AnimatorListenerAdapter() {
-                private var cancelled = false
-                override fun onAnimationCancel(animation: android.animation.Animator) { cancelled = true }
-                override fun onAnimationEnd(animation: android.animation.Animator) {
-                    if (cancelled) return
-                    lp.height = android.view.ViewGroup.LayoutParams.WRAP_CONTENT
-                    root.layoutParams = lp
-                    root.alpha = 1f
-                    if (!active) root.visibility = View.GONE
+        } else {
+            if (root.visibility != View.VISIBLE) return
+            val h = root.height.toFloat().coerceAtLeast(1f)
+            root.pivotX = root.width * 0.5f
+            root.pivotY = h
+            root.animate()
+                .alpha(0f)
+                .scaleY(0.86f)
+                .translationY(ctx.dpf(10f))
+                .setDuration(150)
+                .setInterpolator(AccelerateInterpolator())
+                .withLayer()
+                .withEndAction {
+                    if (!active) {
+                        root.visibility = View.GONE
+                        root.alpha = 1f
+                        root.scaleY = 1f
+                        root.translationY = 0f
+                    }
                 }
-            })
-            start()
+                .start()
         }
     }
 
@@ -329,6 +400,24 @@ class VoiceBar(
     private var recognizer: SpeechRecognizer? = null
     private var listening = false
     private var ready = false
+    private var sessionSeq = 0
+    private var finalizedSeq = -1
+    private var lastPartial = ""
+    private var eosMs = 0L
+
+    private val endFallbackRunnable = Runnable {
+        if (!active || finalizedSeq == sessionSeq) return@Runnable
+        val text = lastPartial
+        if (text.isNotEmpty()) {
+            finalizedSeq = sessionSeq
+            listening = false
+            lastPartial = ""
+            service.currentInputConnection?.finishComposingText()
+            Timber.d("IfboardVoice: fast-commit partial (+%dms): %s", System.currentTimeMillis() - eosMs, text)
+            runCatching { recognizer?.cancel() }
+            if (active) handler.postDelayed({ if (active && !listening) listen() }, 40)
+        }
+    }
 
     var active = false
         private set
@@ -404,13 +493,30 @@ class VoiceBar(
             pulse.animate().scaleX(s).scaleY(s).setDuration(90).start()
         }
         override fun onBufferReceived(buffer: ByteArray?) {}
-        override fun onEndOfSpeech() { pulse.animate().scaleX(1f).scaleY(1f).setDuration(150).start() }
+        override fun onEndOfSpeech() {
+            eosMs = System.currentTimeMillis()
+            pulse.animate().scaleX(1f).scaleY(1f).setDuration(150).start()
+            if (lastPartial.isNotEmpty() && finalizedSeq != sessionSeq) {
+                handler.removeCallbacks(endFallbackRunnable)
+                handler.postDelayed(endFallbackRunnable, 120L)
+            }
+        }
         override fun onError(error: Int) {
+            handler.removeCallbacks(endFallbackRunnable)
             listening = false
-            service.currentInputConnection?.finishComposingText()
+            val text = lastPartial
+            if (text.isNotEmpty() && finalizedSeq != sessionSeq) {
+                finalizedSeq = sessionSeq
+                service.currentInputConnection?.finishComposingText()
+            } else {
+                service.currentInputConnection?.finishComposingText()
+            }
+            lastPartial = ""
             when (error) {
-                SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
-                    if (active) handler.postDelayed({ if (active) listen() }, 200)
+                SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> {
+                    status.text = "正在听取…"
+                    if (active) handler.postDelayed({ if (active) listen() }, 40)
+                }
                 SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> status.text = "需要麦克风权限"
                 SpeechRecognizer.ERROR_CLIENT, SpeechRecognizer.ERROR_SERVER_DISCONNECTED -> {
                     // the recognition service could not be reached (e.g. hidden by the system)
@@ -422,15 +528,28 @@ class VoiceBar(
             }
         }
         override fun onResults(results: Bundle?) {
+            handler.removeCallbacks(endFallbackRunnable)
             listening = false
-            val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
+            if (finalizedSeq == sessionSeq) {
+                lastPartial = ""
+                if (active && !listening) handler.postDelayed({ if (active && !listening) listen() }, 40)
+                return
+            }
+            val finalText = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
+            val text = finalText.ifEmpty { lastPartial }
+            finalizedSeq = sessionSeq
+            lastPartial = ""
             val ic = service.currentInputConnection
             if (text.isNotEmpty()) ic?.commitText(text, 1) else ic?.finishComposingText()
-            if (active) handler.postDelayed({ if (active) listen() }, 200)
+            Timber.d("IfboardVoice: onResults (+%dms after eos): %s", if (eosMs > 0) System.currentTimeMillis() - eosMs else 0, text)
+            if (active) handler.postDelayed({ if (active && !listening) listen() }, 40)
         }
         override fun onPartialResults(partialResults: Bundle?) {
-            val text = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
+            val stable = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
+            val unstable = partialResults?.getString("android.speech.extra.UNSTABLE_TEXT").orEmpty()
+            val text = stable + unstable
             if (text.isNotEmpty()) {
+                lastPartial = text
                 service.currentInputConnection?.setComposingText(text, 1)
                 status.text = text
             }
@@ -471,8 +590,16 @@ class VoiceBar(
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, languageProvider())
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 240L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 120L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 100L)
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, service.packageName)
         }
+        status.text = "正在听取…"
+        sessionSeq++
+        lastPartial = ""
+        eosMs = 0L
         listening = true
         ready = false
         r.startListening(intent)

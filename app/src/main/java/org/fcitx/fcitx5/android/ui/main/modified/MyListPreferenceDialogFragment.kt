@@ -10,6 +10,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.preference.ListPreference
 import androidx.preference.ListPreferenceDialogFragmentCompat
 import org.fcitx.fcitx5.android.R
+import org.fcitx.fcitx5.android.ui.common.WarmPaperUi
 
 class MyListPreferenceDialogFragment : ListPreferenceDialogFragmentCompat() {
     override fun onPrepareDialogBuilder(builder: AlertDialog.Builder) {
@@ -23,6 +24,11 @@ class MyListPreferenceDialogFragment : ListPreferenceDialogFragmentCompat() {
     override fun onBindDialogView(view: View) {
         super.onBindDialogView(view)
         fixDialogMargin(view)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        (dialog as? AlertDialog)?.let { WarmPaperUi.styleAlertDialog(it) }
     }
 
     companion object {

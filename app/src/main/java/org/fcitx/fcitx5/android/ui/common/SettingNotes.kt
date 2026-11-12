@@ -1,8 +1,10 @@
 /*
  * SPDX-License-Identifier: LGPL-2.1-or-later
- * Ifboard: a short, plain-language note for every setting (shown under its title).
+ * Ifboard: 为所有设置项提供简明中文解释，贴于标题下方。
  */
 package org.fcitx.fcitx5.android.ui.common
+
+import androidx.preference.Preference
 
 object SettingNotes {
     val notes: Map<String, String> = mapOf(
@@ -30,8 +32,8 @@ object SettingNotes {
         "keyboard_long_press_delay" to "按住多久算长按（弹出更多字符）。越小越快，太小容易误触",
         "space_long_press_behavior" to "长按空格键要做什么，例如弹出输入法选择",
         "space_swipe_move_cursor" to "在空格键上左右划动来移动光标",
-        "glide_typing" to "手指不抬起、依次划过字母来输入，和 Gboard 一样。中文（小鹤双拼）划过每个字的两个双拼字母，例如「你好」划 n→i→h→c，候选栏会给出对应的词；英文直接划出整个单词，例如 h→e→l→o 得到 hello，连续划下一个词时会自动补空格。轻点、长按和上下划出符号不受影响",
-        "glide_typing_trail" to "滑行时在手指后面画出一条渐隐的淡色轨迹",
+        "glide_typing" to "划过字母连词输入（支持小鹤双拼与英文）",
+        "glide_typing_trail" to "滑行时显示渐隐轨迹线",
         "gb_auto_correct" to "仅英文：按空格时用系统拼写检查自动改正拼错的单词，紧接着按退格可以撤销",
         "gb_auto_capitalize" to "仅英文：在句首自动切换为大写",
         "gb_double_space_period" to "仅英文：连按两下空格自动输入句号和空格",
@@ -59,7 +61,7 @@ object SettingNotes {
         "candidates_item_padding_vertical" to "悬浮候选窗口中每个候选的上下间距",
         "candidates_item_padding_horizontal" to "悬浮候选窗口中每个候选的左右间距",
         // ---- 剪贴板
-        "clipboard_enable" to "记录你复制过的文字，方便从键盘的剪贴板里再次粘贴",
+        "clipboard_enable" to "记录你复制过的文字，并结合最近截图显示在键盘剪贴板里",
         "clipboard_limit" to "最多保留多少条。超过一天的记录会自动清理（已固定的除外）",
         "clipboard_suggestion" to "刚复制了内容时，在工具栏上显示一个可以直接粘贴的提示",
         "clipboard_item_timeout" to "上面那个粘贴提示显示多久后自动消失",
@@ -68,20 +70,21 @@ object SettingNotes {
         // ---- 表情
         "hide_unsupported_emojis" to "隐藏这台手机字体显示不出来的表情",
         "default_emoji_skin_tone" to "带肤色的表情默认使用哪种肤色",
-        // ---- 高级
+        // ---- 高级 / 开发者
         "ignore_system_cursor" to "不读取应用报告的光标位置。只在个别应用光标错乱时打开",
         "hide_key_config" to "在设置里隐藏快捷键相关的配置项",
-        "disable_animation" to "关闭键盘里的所有过渡动画，最省电、最快",
+        "disable_animation" to "关闭键盘与设置里的动态过渡效果，最省电、最快",
         "vivo_keypress_workaround" to "部分 vivo 手机按键无反应时打开",
         "ignore_system_window_insets" to "忽略系统导航栏占用的空间。键盘位置异常时再尝试",
+        "verbose_log" to "记录更详细的调试信息，排查卡顿或同步异常时再打开",
+        "editor_info_inspector" to "在输入时显示当前输入框向输入法传来的类型与标志（开发排障用）",
         // ---- 主题
         "key_border" to "按键显示成独立的圆角块（Gboard 样式）。关闭后按键没有底色",
         "key_border_stroke" to "按键边缘加一圈细描边",
         "key_ripple_effect" to "按下按键时出现水波纹",
-        "ifb_glass_effect" to "键盘背景变成半透明毛玻璃，长按弹出栏也带模糊效果。关闭后更省电",
-        "key_horizontal_margin" to "按键之间的左右间距（竖屏 / 横屏）",
+        "key_horizontal_margin" to "按键之间的左右间距（竖屏）",
         "key_horizontal_margin_landscape" to "横屏时按键之间的左右间距",
-        "key_vertical_margin" to "按键之间的上下间距（竖屏 / 横屏）",
+        "key_vertical_margin" to "按键之间的上下间距（竖屏）",
         "key_vertical_margin_landscape" to "横屏时按键之间的上下间距",
         "key_radius" to "按键圆角大小。6dp 与 Gboard 一致",
         "text_editing_button_radius" to "「文本编辑」面板里按钮的圆角",
@@ -91,13 +94,96 @@ object SettingNotes {
         "follow_system_dark_mode" to "手机切换深色 / 浅色模式时，键盘主题自动跟着换",
         "light_mode_theme" to "浅色模式下使用的键盘主题",
         "dark_mode_theme" to "深色模式下使用的键盘主题",
-        // ---- Ifboard
-        "ifb_webdav_url" to "WebDAV 服务器地址，例如坚果云：https://dav.jianguoyun.com/dav/",
-        "ifb_webdav_user" to "WebDAV 账号（坚果云是登录邮箱）",
-        "ifb_webdav_password" to "WebDAV 密码（坚果云需要在「第三方应用管理」里生成应用密码）",
-        "ifb_webdav_dir" to "词库在服务器上存放的文件夹名",
-        "ifb_webdav_sync_now" to "把本机的个人词频上传，并合并其他设备的词库",
-        "ifb_check_update" to "到 GitHub 查看有没有新版本",
-        "ifb_auto_check_update" to "每次打开设置时自动检查一次新版本"
+        // ---- Ifboard 同步与更新
+        "ifb_webdav_provider" to "一键填入对应网盘的 WebDAV 服务器地址，支持 Koofr 与坚果云",
+        "ifb_webdav_url" to "WebDAV 服务器地址，默认使用 Koofr（https://app.koofr.net/dav/Koofr）",
+        "ifb_webdav_user" to "WebDAV 账号（Koofr / 坚果云均为登录邮箱）",
+        "ifb_webdav_password" to "WebDAV 专用应用密码（在网盘安全设置里生成，不是网盘登录密码）",
+        "ifb_webdav_dir" to "词库在云盘里存放的文件夹名，手机与电脑保持一致即可互通",
+        "ifb_webdav_sync_now" to "把本机的个人词频上传，并合并其他设备（如电脑小狼毫）同步来的词库",
+        "ifb_gram_status" to "万象语法模型文件约 400 MB，用于提升长句与双拼整句识别准确率",
+        "ifb_check_update" to "到 GitHub 检查 Ifboard 是否有新版本",
+        "ifb_auto_check_update" to "每次打开设置主页时自动在后台检查一次新版本",
+        // ---- Fcitx 常见全局选项（若插件未自带说明则补充）
+        "Hotkey" to "外接实体键盘时，用于中英文或状态切换的快捷键组合",
+        "Behavior" to "候选翻页、默认输入状态、空格或回车行为等基础习惯",
+        "Output" to "标点转换、数字后半角、全角半角切换等输出规则",
+        "ActiveByDefault" to "切换到可输入框时默认启用中文输入状态（而不是英文直通）",
+        "ResetStateWhenFocusIn" to "重新聚焦到其他输入框时如何重置中英文和临时状态",
+        "ShareInputState" to "多个应用或标签页之间是否共享当前中英文状态",
+        "PreeditInApplication" to "是否在输入框光标处直接嵌入显示拼音编码",
+        "PreeditCursorPositionAtBeginning" to "嵌入式拼音时，把输入框光标放在拼音最前面",
+        "ShowInputMethodInformation" to "切换输入法或方案时，在屏幕短暂提示当前方案名称",
+        "CompactInputState" to "尽量合并并精简多输入框共用的内部输入状态",
+        "DefaultPageSize" to "每一页一次展示多少个候选词（一般设为 5–7 个）",
+        "ShowFirstInputMethodInHistory" to "按切换快捷键时优先回到上一次使用的输入法",
+        "AllowOverridingSystemXKBSettings" to "由 Fcitx 接管外接实体键盘的键位映射规则"
     )
+
+    val byTitle: Map<String, String> = mapOf(
+        // ---- 设置首页（精简为清晰单行）
+        "同步与更新" to "WebDAV 跨设备词库与万象语法模型",
+        "主题" to "配色方案、圆角间距与液态玻璃效果",
+        "输入法" to "中文 Rime / 小鹤双拼与英文输入管理",
+        "附加组件" to "Rime 引擎、剪贴板、云拼音与标点模块",
+        "全局选项" to "快捷键、每页候选数与默认输入状态",
+        "虚拟键盘" to "振动音效、滑行输入、长按与高度调节",
+        "候选窗口" to "候选词排列与实体键盘悬浮窗样式",
+        "剪贴板" to "复制历史记录、截图并排与隐私遮挡",
+        "表情和符号" to "Emoji 兼容性过滤与默认肤色",
+        "高级" to "数据导入导出、关闭动画与兼容开关",
+        "插件" to "已安装的扩展词库与功能插件",
+        "关于" to "版本信息、隐私说明与开源许可",
+        "开发者" to "实时日志、引擎重启与缓存重置",
+        // ---- 高级页面
+        "浏览用户数据目录" to "用系统文件管理器打开 Rime 词典与配置目录",
+        "导出用户数据" to "将词库、主题和配置打包导出为压缩包",
+        "导入用户数据" to "从备份压缩包恢复设置与个人词库",
+        // ---- 开发者页面
+        "实时日志" to "查看运行日志，排查分词、滑行与同步问题",
+        "详细记录日志" to "输出调试级详细日志（排查完毕建议关闭）",
+        "编辑器信息 (EditorInfo) 检查器" to "显示当前输入框传递的输入类型与标志",
+        "重启输入引擎" to "重新加载底层引擎（保留个人配置与词库）",
+        "删除并同步运行数据" to "重置运行缓存并从安装包同步内置词典（危险操作）",
+        "清空剪贴板数据库" to "永久删除已保存的全部剪贴板记录",
+        "捕获堆内存转储" to "生成进程内存快照供性能分析",
+        // ---- 关于页面
+        "常见问题" to "权限开启、双拼滑行与 WebDAV 同步指引",
+        "隐私政策" to "离线存储机制与按需网络权限说明",
+        "源代码" to "访问 github.com/Wlaina/Ifboard",
+        // ---- 插件页面
+        "检测到插件更改，点此重新加载" to "检测到插件变更，点此刷新输入引擎",
+        // ---- Ifboard
+        "GitHub 仓库" to "查看源码、更新日志与历史安装包发布",
+        // ---- Fcitx 常见中文项名兜底
+        "触发输入法" to "外接键盘开/关中文输入的快捷键",
+        "切换激活状态与非激活状态" to "快速在中英文状态间切换的快捷键",
+        "上一页" to "候选窗向前翻页快捷键",
+        "下一页" to "候选窗向后翻页快捷键",
+        "候选词页大小" to "每一页显示的候选词数量",
+        "默认启用" to "切换到新输入框时默认启用中文状态",
+        "在应用中显示预编辑" to "将正在输入的编码嵌入应用光标处显示",
+        "切换输入法时显示提示" to "更换输入方案时屏幕短暂提示方案名",
+        "Rime 用户数据目录" to "查看本机 Rime 配置与个人词库文件夹",
+        "共享输入状态" to "跨输入框保持同一中英文状态",
+        "快速短语" to "管理快捷短语缩写展开",
+        "自定义短语" to "添加或修改置顶候选短语",
+        "标点符号" to "自定义中文模式下全/半角标点",
+        "拼音词典" to "导入扩展词库与细胞词库",
+        "按住切换键的修饰键时进行轮换切换" to "按住修饰键点切换键依次轮换输入法",
+        "轮换输入法时跳过第一个输入法" to "轮换切换时跳过列表首个默认输入法",
+        "重新聚焦时重置状态" to "重新聚焦输入框时恢复初始输入状态",
+        "在程序中显示预编辑文本" to "在输入框光标位置直接嵌入未上屏编码",
+        "在焦点更改时显示输入法信息" to "切换输入框时短暂提示当前激活方案",
+        "显示紧凑的输入法信息" to "仅提示简短方案名或状态缩写",
+        "显示第一个输入法的信息" to "单个启用中方案也显示切换状态提示",
+        "允许在密码框中使用输入法" to "在密码框保留当前输入框架（一般建议关闭）",
+        "输入密码时显示预编辑文本" to "在密码框显示未上屏编码（建议关闭）"
+    )
+
+    fun lookup(p: Preference): String? {
+        p.key?.let { k -> notes[k]?.let { return it } }
+        val title = p.title?.toString()?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        return byTitle[title]
+    }
 }

@@ -160,13 +160,14 @@ class PickerWindow(
     }
 
     private fun PickerLayout.setupVerticalList(bordered: Boolean) {
-        val rows = if (density == PickerPageUi.Density.EmoticonRow) 3.5f else 4.5f
+        val rows = if (density == PickerPageUi.Density.EmoticonRow) 3.5f else 4.15f
         pickerListAdapter = PickerListAdapter(
             theme, keyActionListener, popupActionListener, data,
             density, key.name, bordered, policy, rows
         )
         tabsUi.apply {
-            setTabs(pickerListAdapter.getCategoryList())
+            setOnBackClickListener { windowManager.attachWindow(KeyboardWindow) }
+            setTabs(pickerListAdapter.getCategoryList(), showBackButton = true)
             setOnTabClickListener { i ->
                 popup.dismissAll()
                 listLayoutManager.scrollToPositionWithOffset(pickerListAdapter.getCategoryStart(i), 0)

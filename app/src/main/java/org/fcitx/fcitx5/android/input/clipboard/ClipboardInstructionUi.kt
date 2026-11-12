@@ -38,7 +38,9 @@ sealed class ClipboardInstructionUi(override val ctx: Context, protected val the
 
         val enableButton = androidStyles.button.borderless {
             setText(R.string.clipboard_enable)
-            setTextColor(theme.accentKeyBackgroundColor)
+            setTextColor(theme.genericActiveBackgroundColor)
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            isClickable = true
         }
 
         override val root = constraintLayout {

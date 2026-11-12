@@ -67,6 +67,12 @@ open class PreeditUi(
         view.visibility = if (visible) View.VISIBLE else View.GONE
     }
 
+    fun updateOverride(text: String) {
+        visible = text.isNotEmpty()
+        updateTextView(upView, text, visible)
+        updateTextView(downView, "", false)
+    }
+
     fun update(inputPanel: FcitxEvent.InputPanelEvent.Data) {
         val activeBkg = theme.genericActiveBackgroundColor
         val upString: SpannedString

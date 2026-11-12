@@ -33,7 +33,7 @@ class NumberKeyboard(
                 NumPadKey("1", 0xffb1, 30f, 0f),
                 NumPadKey("2", 0xffb2, 30f, 0f),
                 NumPadKey("3", 0xffb3, 30f, 0f),
-                NumPadKey("%", 0x25, 23f, 0.15f, KeyDef.Appearance.Variant.Alternative),
+                NumPadKey("%", 0x25, 26f, 0.15f, KeyDef.Appearance.Variant.Alternative),
             ),
             listOf(
                 SpacerKey(),
@@ -51,11 +51,11 @@ class NumberKeyboard(
             ),
             listOf(
                 LayoutSwitchKey("返回", TextKeyboard.Name, 0.15f, KeyDef.Appearance.Variant.Alternative),
-                NumPadKey(",", 0xffac, 23f, 0.1f, KeyDef.Appearance.Variant.Alternative),
+                NumPadKey(",", 0xffac, 26f, 0.1f, KeyDef.Appearance.Variant.Alternative),
                 LayoutSwitchKey("!?#", GboardSymbolKeyboard.Page1Name, 0.13333f, KeyDef.Appearance.Variant.AltForeground),
                 NumPadKey("0", 0xffb0, 30f, 0.23334f),
-                NumPadKey("=", 0xffbd, 23f, 0.13333f, KeyDef.Appearance.Variant.AltForeground),
-                NumPadKey(".", 0xffae, 23f, 0.1f, KeyDef.Appearance.Variant.Alternative),
+                NumPadKey("=", 0xffbd, 26f, 0.13333f, KeyDef.Appearance.Variant.AltForeground),
+                NumPadKey(".", 0xffae, 26f, 0.1f, KeyDef.Appearance.Variant.Alternative),
                 ReturnKey()
             )
         )
@@ -117,10 +117,11 @@ class NumberKeyboard(
         stripSymbols.forEach { sym ->
             column.addView(android.widget.TextView(context).apply {
                 text = sym
-                textSize = 23f
+                textSize = 25.5f
                 gravity = android.view.Gravity.CENTER
                 setTextColor(theme.altKeyTextColor)
                 GboardFont.get(context)?.let { typeface = it }
+                paint.applyKeycapStroke(context.resources.displayMetrics.density, 0.28f)
                 background = android.graphics.drawable.RippleDrawable(
                     android.content.res.ColorStateList.valueOf(theme.keyPressHighlightColor), null, null
                 )

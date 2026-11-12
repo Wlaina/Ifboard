@@ -20,9 +20,11 @@ import org.fcitx.fcitx5.android.core.RawConfig
 import org.fcitx.fcitx5.android.data.quickphrase.QuickPhrase
 import org.fcitx.fcitx5.android.ui.main.AboutFragment
 import org.fcitx.fcitx5.android.ui.main.DeveloperFragment
+import org.fcitx.fcitx5.android.ui.main.FaqFragment
 import org.fcitx.fcitx5.android.ui.main.LicensesFragment
 import org.fcitx.fcitx5.android.ui.main.MainFragment
 import org.fcitx.fcitx5.android.ui.main.PluginFragment
+import org.fcitx.fcitx5.android.ui.main.PrivacyFragment
 import org.fcitx.fcitx5.android.ui.main.settings.addon.AddonConfigFragment
 import org.fcitx.fcitx5.android.ui.main.settings.addon.AddonListFragment
 import org.fcitx.fcitx5.android.ui.main.settings.behavior.AdvancedSettingsFragment
@@ -88,6 +90,12 @@ sealed class SettingsRoute : Parcelable {
 
     @Serializable
     data object Developer : SettingsRoute()
+
+    @Serializable
+    data object Faq : SettingsRoute()
+
+    @Serializable
+    data object Privacy : SettingsRoute()
 
     @Serializable
     data object License : SettingsRoute()
@@ -227,6 +235,12 @@ sealed class SettingsRoute : Parcelable {
             }
             fragment<DeveloperFragment, Developer> {
                 label = ctx.getString(R.string.developer)
+            }
+            fragment<FaqFragment, Faq> {
+                label = ctx.getString(R.string.faq)
+            }
+            fragment<PrivacyFragment, Privacy> {
+                label = ctx.getString(R.string.privacy_policy)
             }
             fragment<LicensesFragment, License> {
                 label = ctx.getString(R.string.license)

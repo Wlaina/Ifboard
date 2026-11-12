@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.core.FcitxEvent
+import org.fcitx.fcitx5.android.input.keyboard.FlypyTypoCorrector
 import org.fcitx.fcitx5.android.input.keyboard.GboardSpell
 import org.fcitx.fcitx5.android.core.InputMethodEntry
 import org.fcitx.fcitx5.android.core.CandidateWord
@@ -99,7 +100,15 @@ class HorizontalCandidateComponent :
                 holder.itemView.setOnClickListener {
                     val engineIndex = engineIdx.getOrElse(holder.idx) { holder.idx }
                     if (engineIndex >= 0) {
+                        if (flypy) FlypyTypoCorrector.onEngineCandidateSelected(holder.candidate.text)
                         fcitx.launchOnReady { it.select(engineIndex) }
+                    } else if (engineIndex == -2) {
+                        // 小鹤双拼邻键容错纠错词条：直接上屏中文词（不追加空格）并重置引擎
+                        val word = holder.candidate.text
+                        primaryCorrectionWord = null
+                        FlypyTypoCorrector.clear()
+                        service.commitText(word)
+                        fcitx.launchOnReady { it.reset() }
                     } else {
                         // Gboard style correction from the system spell checker
                         val word = holder.candidate.text
@@ -182,19 +191,81 @@ class HorizontalCandidateComponent :
 
     private val service by manager.inputMethodService()
     private var english = false
+    private var flypy = false
+    private var primaryCorrectionWord: String? = null
     private val spell by lazy { GboardSpell(context) }
-    // maps displayed position -> engine candidate index (-1 for injected corrections)
+    // maps displayed position -> engine candidate index (-1 for injected corrections, -2 for Flypy typos)
     private var engineIdx: IntArray = IntArray(0)
     private var lastEngineData: FcitxEvent.CandidateListEvent.Data? = null
 
+    fun commitPrimaryCorrection(): Boolean {
+        val word = primaryCorrectionWord ?: return false
+        primaryCorrectionWord = null
+        FlypyTypoCorrector.clear()
+        service.commitText(word)
+        fcitx.launchOnReady { it.reset() }
+        return true
+    }
+
     override fun onImeUpdate(ime: InputMethodEntry) {
         english = ime.uniqueName.startsWith("keyboard-")
+        flypy = ime.uniqueName == "rime" && ime.subMode.run {
+            name.contains("小鹤") || label.contains("小鹤") ||
+                name.contains("flypy", ignoreCase = true) || label.contains("flypy", ignoreCase = true)
+        }
+        primaryCorrectionWord = null
+        if (!flypy) FlypyTypoCorrector.clear()
         if (!english) spell.close()
+    }
+
+    override fun onInputPanelUpdate(data: FcitxEvent.InputPanelEvent.Data) {
+        if (flypy) {
+            val clientEmpty = fcitx.runImmediately { clientPreeditCached.isEmpty() }
+            if (data.preedit.isEmpty() && data.auxUp.isEmpty() && clientEmpty) {
+                FlypyTypoCorrector.clear()
+            }
+        }
+    }
+
+    override fun onPreeditEmptyStateUpdate(empty: Boolean) {
+        if (empty) {
+            primaryCorrectionWord = null
+            FlypyTypoCorrector.clear()
+        }
     }
 
     override fun onCandidateUpdate(data: FcitxEvent.CandidateListEvent.Data) {
         lastEngineData = data
+        primaryCorrectionWord = null
         engineIdx = IntArray(data.candidates.size) { it }
+        if (flypy) {
+            val sugs = FlypyTypoCorrector.suggest(data.candidates)
+            if (sugs.isNotEmpty()) {
+                val sugWords = sugs.map { it.word }.toSet()
+                val promote = sugs[0].promotePrimary
+                val merged = ArrayList<CandidateWord>(data.candidates.size + sugs.size)
+                val idx = ArrayList<Int>(data.candidates.size + sugs.size)
+                if (promote) {
+                    sugs.forEach { merged.add(CandidateWord("", it.word, "")); idx.add(-2) }
+                    data.candidates.forEachIndexed { i, c ->
+                        if (c.text !in sugWords) { merged.add(c); idx.add(i) }
+                    }
+                    primaryCorrectionWord = sugs[0].word
+                } else {
+                    if (data.candidates.isNotEmpty()) {
+                        merged.add(data.candidates[0]); idx.add(0)
+                    }
+                    sugs.forEach { merged.add(CandidateWord("", it.word, "")); idx.add(-2) }
+                    for (i in 1 until data.candidates.size) {
+                        val c = data.candidates[i]
+                        if (c.text !in sugWords) { merged.add(c); idx.add(i) }
+                    }
+                }
+                engineIdx = idx.toIntArray()
+                show(merged.toTypedArray(), if (data.total < 0) -1 else data.total + sugs.size)
+                return
+            }
+        }
         show(data.candidates, data.total)
         if (!english) return
         val word = data.candidates.firstOrNull()?.text ?: return

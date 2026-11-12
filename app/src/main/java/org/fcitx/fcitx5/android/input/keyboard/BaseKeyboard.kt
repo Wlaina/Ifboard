@@ -405,6 +405,12 @@ abstract class BaseKeyboard(
     /** called with the finished gesture (points in this view's coordinates) */
     protected open fun onGlideGesture(xy: FloatArray, n: Int, geometry: GlideTyping.Geometry) {}
 
+    /** called throttled during an active glide gesture for live preview */
+    protected open fun onGlideProgress(xy: FloatArray, n: Int, geometry: GlideTyping.Geometry) {}
+
+    /** called when a glide gesture finishes or cancels */
+    protected open fun onGlideCancel() {}
+
     private enum class GlideState { Idle, Tracking, Gliding, Rejected }
 
     private val glideTyping = prefs.keyboard.glideTyping
@@ -418,9 +424,18 @@ abstract class BaseKeyboard(
     private var glideT = LongArray(512)
     private var glideN = 0
     private var glidePathLen = 0f
+    private var lastGlidePreviewTime = 0L
+    private var lastGlidePreviewN = 0
     private var glideGeometry: GlideTyping.Geometry? = null
     private val glideRect = Rect()
     private val glideSlop = ViewConfiguration.get(context).scaledTouchSlop
+
+    protected var lastTapX = Float.NaN
+        private set
+    protected var lastTapY = Float.NaN
+        private set
+
+    protected fun currentGlideGeometry(): GlideTyping.Geometry? = glideGeometry()
     private var trailVisible = false
     private val trailWidth = dp(6.5f)
     private val trailPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -511,9 +526,19 @@ abstract class BaseKeyboard(
         }
         val g = glideGeometry() ?: return
         val dx = (x - glideXY[0]).absoluteValue
+        val dy = y - glideXY[1]
         val over = letterKeyAt(x, y)
-        // a mostly vertical flick stays a swipe-for-symbol gesture
-        if ((over != null && over !== start && dx > 0.5f * g.keyW) || glidePathLen > 3f * g.keyW) {
+        // 仅保留与设置方向一致的短距离纯纵向滑动给单键“滑出符号”；
+        // 其余跨键/斜向/较长轨迹立即进入滑行输入（覆盖 d->e, u->h, e->d 等 2~3 键高频词）
+        val isPureSymbolFlick = when (swipeSymbolDirection) {
+            SwipeSymbolDirection.Down -> dy > 0f
+            SwipeSymbolDirection.Up -> dy < 0f
+            SwipeSymbolDirection.Disabled -> false
+        } && dx <= 0.35f * g.keyW && glidePathLen <= 1.45f * g.keyH
+        if ((over != null && over !== start && !isPureSymbolFlick) ||
+            dx > 0.42f * g.keyW ||
+            glidePathLen > 1.55f * g.keyW
+        ) {
             beginGlide(ev)
         }
     }
@@ -526,11 +551,17 @@ abstract class BaseKeyboard(
         super.dispatchTouchEvent(cancel)
         cancel.recycle()
         trailVisible = glideTrail
+        lastGlidePreviewTime = ev.eventTime
+        lastGlidePreviewN = glideN
+        if (glideN >= 2) {
+            glideGeometry()?.let { onGlideProgress(glideXY.copyOf(2 * glideN), glideN, it) }
+        }
         invalidate()
     }
 
     private fun finishGlide(commit: Boolean) {
         glideState = GlideState.Idle
+        onGlideCancel()
         if (commit && glideN >= 2) {
             glideGeometry()?.let { onGlideGesture(glideXY.copyOf(2 * glideN), glideN, it) }
         }
@@ -538,6 +569,10 @@ abstract class BaseKeyboard(
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
+            lastTapX = ev.x
+            lastTapY = ev.y
+        }
         val mode = glideMode
         if (mode == null || (glideState != GlideState.Gliding && !glideTyping.getValue())) {
             return super.dispatchTouchEvent(ev)
@@ -571,6 +606,12 @@ abstract class BaseKeyboard(
                     }
                     GlideState.Gliding -> {
                         if (i >= 0) glideAddMove(ev, i)
+                        val now = ev.eventTime
+                        if (glideN >= 2 && glideN != lastGlidePreviewN && now - lastGlidePreviewTime >= 45L) {
+                            lastGlidePreviewTime = now
+                            lastGlidePreviewN = glideN
+                            glideGeometry()?.let { onGlideProgress(glideXY.copyOf(2 * glideN), glideN, it) }
+                        }
                         if (trailVisible) invalidate()
                         return true
                     }

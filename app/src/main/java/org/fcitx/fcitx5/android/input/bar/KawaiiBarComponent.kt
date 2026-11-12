@@ -5,8 +5,11 @@
 package org.fcitx.fcitx5.android.input.bar
 
 import android.graphics.Color
+import android.graphics.Rect
+import android.graphics.Typeface
 import android.os.Build
 import android.util.Size
+import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
@@ -15,6 +18,9 @@ import android.view.inputmethod.InlineSuggestion
 import android.view.inputmethod.InlineSuggestionsResponse
 import android.view.inputmethod.InputMethodSubtype
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
+import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.ViewAnimator
 import android.widget.inline.InlineContentView
 import androidx.annotation.Keep
@@ -66,7 +72,11 @@ import org.fcitx.fcitx5.android.input.dependency.theme
 import org.fcitx.fcitx5.android.input.editing.TextEditingWindow
 import org.fcitx.fcitx5.android.input.keyboard.CommonKeyActionListener
 import org.fcitx.fcitx5.android.input.keyboard.CustomGestureView
+import org.fcitx.fcitx5.android.input.keyboard.KeyAction
+import org.fcitx.fcitx5.android.input.keyboard.KeyActionListener
+import org.fcitx.fcitx5.android.input.keyboard.KeyDef
 import org.fcitx.fcitx5.android.input.keyboard.KeyboardWindow
+import org.fcitx.fcitx5.android.input.popup.PopupAction
 import org.fcitx.fcitx5.android.input.popup.PopupComponent
 import org.fcitx.fcitx5.android.input.status.StatusAreaWindow
 import org.fcitx.fcitx5.android.input.wm.InputWindow
@@ -81,6 +91,7 @@ import splitties.views.backgroundColor
 import splitties.views.dsl.core.add
 import splitties.views.dsl.core.lParams
 import splitties.views.dsl.core.matchParent
+import splitties.views.horizontalPadding
 import java.util.concurrent.Executor
 import kotlin.coroutines.resume
 import kotlin.math.PI
@@ -309,8 +320,64 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
             }
             buttonsUi.apply {
                 translateButton.setOnClickListener { inputView.translatePanel.toggle() }
-                undoButton.setOnClickListener {
-                    service.sendCombinationKeyEvents(KeyEvent.KEYCODE_Z, ctrl = true)
+                undoButton.apply {
+                    if (id == View.NO_ID) id = View.generateViewId()
+                    val undoMenu = KeyDef.Popup.Menu(
+                        arrayOf(
+                            KeyDef.Popup.Menu.Item("回退", R.drawable.ic_gb_undo, KeyAction.UndoAction),
+                            KeyDef.Popup.Menu.Item("前进", R.drawable.ic_gb_redo, KeyAction.RedoAction)
+                        )
+                    )
+                    var menuShown = false
+                    var menuWasShown = false
+                    val triggerRect = Rect()
+                    val loc = intArrayOf(0, 0)
+                    setOnClickListener {
+                        commonKeyActionListener.listener.onKeyAction(
+                            KeyAction.UndoAction, KeyActionListener.Source.Keyboard
+                        )
+                    }
+                    longPressEnabled = true
+                    swipeEnabled = true
+                    setOnLongClickListener { v ->
+                        v.getLocationInWindow(loc)
+                        triggerRect.set(loc[0], loc[1], loc[0] + v.width, loc[1] + v.height)
+                        menuShown = true
+                        menuWasShown = true
+                        popup.listener.onPopupAction(PopupAction.ShowMenuAction(v.id, undoMenu, triggerRect))
+                        false
+                    }
+                    onGestureListener = CustomGestureView.OnGestureListener { v, event ->
+                        when (event.type) {
+                            CustomGestureView.GestureType.Down -> {
+                                menuShown = false
+                                menuWasShown = false
+                                false
+                            }
+                            CustomGestureView.GestureType.Move -> if (menuShown) {
+                                val dismissed = PopupAction.ChangeFocusAction(v.id, event.x, event.y)
+                                    .also { popup.listener.onPopupAction(it) }.outResult
+                                if (dismissed) menuShown = false
+                                true
+                            } else false
+                            CustomGestureView.GestureType.Up -> if (menuWasShown) {
+                                if (menuShown) {
+                                    val trigger = PopupAction.TriggerAction(v.id).also {
+                                        popup.listener.onPopupAction(it)
+                                    }
+                                    popup.listener.onPopupAction(PopupAction.DismissAction(v.id))
+                                    trigger.outAction?.let { act ->
+                                        commonKeyActionListener.listener.onKeyAction(
+                                            act, KeyActionListener.Source.Popup
+                                        )
+                                    }
+                                }
+                                menuShown = false
+                                menuWasShown = false
+                                true
+                            } else false
+                        }
+                    }
                 }
                 clipboardButton.setOnClickListener {
                     windowManager.attachWindow(ClipboardWindow())
@@ -410,26 +477,79 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
         candidateUi.expandButton.visibility = if (enabled) View.VISIBLE else View.INVISIBLE
     }
 
+    private val animator by lazy {
+        ViewAnimator(context).apply {
+            add(idleUi.root, lParams(matchParent, matchParent))
+            add(candidateUi.root, lParams(matchParent, matchParent))
+            add(titleUi.root, lParams(matchParent, matchParent))
+        }
+    }
+
+    private val glidePreviewRow by lazy {
+        LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            horizontalPadding = dp(8)
+        }
+    }
+
+    private val glidePreviewBar by lazy {
+        HorizontalScrollView(context).apply {
+            isHorizontalScrollBarEnabled = false
+            visibility = View.GONE
+            addView(glidePreviewRow, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            ))
+        }
+    }
+
+    fun showGlideCandidates(candidates: List<String>) {
+        glidePreviewRow.removeAllViews()
+        candidates.forEachIndexed { i, word ->
+            glidePreviewRow.addView(TextView(context).apply {
+                text = word
+                textSize = 18f
+                typeface = if (i == 0) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+                setTextColor(
+                    if (i == 0) (theme.genericActiveBackgroundColor or 0xFF000000.toInt())
+                    else theme.candidateTextColor
+                )
+                gravity = Gravity.CENTER
+                horizontalPadding = dp(12)
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        }
+        val show = candidates.isNotEmpty()
+        glidePreviewBar.scrollTo(0, 0)
+        glidePreviewBar.visibility = if (show) View.VISIBLE else View.GONE
+        animator.visibility = if (show) View.INVISIBLE else View.VISIBLE
+    }
+
+    fun clearGlideCandidates() {
+        glidePreviewBar.visibility = View.GONE
+        animator.visibility = View.VISIBLE
+        glidePreviewRow.removeAllViews()
+    }
+
     private fun switchUiByState(state: KawaiiBarStateMachine.State) {
         val index = state.ordinal
-        if (view.displayedChild == index) return
-        val new = view.getChildAt(index)
+        if (animator.displayedChild == index) return
+        val new = animator.getChildAt(index)
         if (new != titleUi.root) {
             titleUi.setReturnButtonOnClickListener { }
             titleUi.setTitle("")
             titleUi.removeExtension()
         }
-        view.displayedChild = index
+        animator.displayedChild = index
     }
 
     override val view by lazy {
-        ViewAnimator(context).apply {
+        FrameLayout(context).apply {
             backgroundColor =
                 if (ThemeManager.prefs.keyBorder.getValue()) Color.TRANSPARENT
                 else theme.barColor
-            add(idleUi.root, lParams(matchParent, matchParent))
-            add(candidateUi.root, lParams(matchParent, matchParent))
-            add(titleUi.root, lParams(matchParent, matchParent))
+            add(animator, lParams(matchParent, matchParent))
+            add(glidePreviewBar, lParams(matchParent, matchParent))
         }
     }
 

@@ -24,6 +24,14 @@ sealed class KeyAction {
     // a word produced by glide typing on the English keyboard (space is added when needed)
     data class GlideWordAction(val word: String) : KeyAction()
 
+    data class GlidePreviewAction(val code: String, val candidates: List<String>) : KeyAction()
+
+    data object GlidePreviewClearAction : KeyAction()
+
+    data object UndoAction : KeyAction()
+
+    data object RedoAction : KeyAction()
+
     data class CapsAction(val lock: Boolean) : KeyAction()
 
     data object QuickPhraseAction : KeyAction()

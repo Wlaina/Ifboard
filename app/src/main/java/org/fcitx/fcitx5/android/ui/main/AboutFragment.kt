@@ -22,7 +22,7 @@ class AboutFragment : PaddingPreferenceFragment() {
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         preferenceScreen = preferenceManager.createPreferenceScreen(requireContext()).apply {
             addPreference(R.string.privacy_policy) {
-                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(Const.privacyPolicyUrl)))
+                navigateWithAnim(SettingsRoute.Privacy)
             }
             addPreference(
                 R.string.open_source_licenses,

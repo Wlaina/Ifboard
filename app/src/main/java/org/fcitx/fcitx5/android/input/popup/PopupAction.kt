@@ -39,6 +39,14 @@ sealed class PopupAction {
         val bounds: Rect
     ) : PopupAction()
 
+    data class ShowChoiceAction(
+        override val viewId: Int,
+        val items: List<String>,
+        val bounds: Rect,
+        val initialIndex: Int = 0,
+        val onSelect: (Int) -> Unit
+    ) : PopupAction()
+
     data class ChangeFocusAction(
         override val viewId: Int,
         val x: Float,

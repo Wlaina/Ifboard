@@ -31,8 +31,8 @@ import androidx.core.content.FileProvider
 import androidx.core.view.inputmethod.EditorInfoCompat
 import androidx.core.view.inputmethod.InputConnectionCompat
 import androidx.core.view.inputmethod.InputContentInfoCompat
+import androidx.preference.PreferenceManager
 import androidx.recyclerview.widget.RecyclerView
-import androidx.recyclerview.widget.StaggeredGridLayoutManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -49,6 +49,38 @@ object ClipboardImages {
 
     private const val MAX_SCREENSHOTS = 20
     private const val MAX_AGE_SECONDS = 24L * 60 * 60
+    private const val PREF_CLEARED_AT = "ifb_clip_img_cleared_at"
+    private const val PREF_CLEARED_URI = "ifb_clip_img_cleared_uri"
+
+    data class DismissState(val clearedAt: Long, val clearedUri: String?)
+
+    fun dismissAll(ctx: Context, displayed: List<ClipboardImage>): DismissState {
+        val sp = PreferenceManager.getDefaultSharedPreferences(ctx)
+        val prev = DismissState(sp.getLong(PREF_CLEARED_AT, 0L), sp.getString(PREF_CLEARED_URI, null))
+        val maxTs = maxOf(
+            System.currentTimeMillis(),
+            displayed.filter { !it.fromClipboard }.maxOfOrNull { it.timestamp } ?: 0L
+        )
+        val clipUri = displayed.firstOrNull { it.fromClipboard }?.uri?.toString()
+        sp.edit()
+            .putLong(PREF_CLEARED_AT, maxTs)
+            .apply {
+                if (clipUri != null) putString(PREF_CLEARED_URI, clipUri) else remove(PREF_CLEARED_URI)
+            }
+            .apply()
+        return prev
+    }
+
+    fun restoreDismiss(ctx: Context, state: DismissState) {
+        val sp = PreferenceManager.getDefaultSharedPreferences(ctx)
+        sp.edit()
+            .putLong(PREF_CLEARED_AT, state.clearedAt)
+            .apply {
+                if (state.clearedUri != null) putString(PREF_CLEARED_URI, state.clearedUri)
+                else remove(PREF_CLEARED_URI)
+            }
+            .apply()
+    }
 
     fun hasMediaPermission(ctx: Context): Boolean {
         val perm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
@@ -58,6 +90,9 @@ object ClipboardImages {
 
     /** must be called off the main thread */
     fun load(ctx: Context): List<ClipboardImage> {
+        val sp = PreferenceManager.getDefaultSharedPreferences(ctx)
+        val clearedAt = sp.getLong(PREF_CLEARED_AT, 0L)
+        val clearedUri = sp.getString(PREF_CLEARED_URI, null)
         val result = mutableListOf<ClipboardImage>()
         // 1. image on system clipboard
         runCatching {
@@ -66,6 +101,7 @@ object ClipboardImages {
             if (clip != null) {
                 for (i in 0 until clip.itemCount) {
                     val uri = clip.getItemAt(i).uri ?: continue
+                    if (uri.toString() == clearedUri) continue
                     val mime = ctx.contentResolver.getType(uri)
                         ?: clip.description.let { d -> (0 until d.mimeTypeCount).map { d.getMimeType(it) } }
                             .firstOrNull { it.startsWith("image/") }
@@ -95,8 +131,10 @@ object ClipboardImages {
                 val dateCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
                 var n = 0
                 while (c.moveToNext() && n < MAX_SCREENSHOTS) {
+                    val ts = c.getLong(dateCol) * 1000
+                    if (ts <= clearedAt) continue
                     val uri = Uri.withAppendedPath(collection, c.getLong(idCol).toString())
-                    result.add(ClipboardImage(uri, c.getString(mimeCol) ?: "image/png", false, c.getLong(dateCol) * 1000))
+                    result.add(ClipboardImage(uri, c.getString(mimeCol) ?: "image/png", false, ts))
                     n++
                 }
             }
@@ -177,8 +215,8 @@ class ClipboardImageAdapter(
         val ctx = parent.context
         val view = ImageView(ctx).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
-            layoutParams = StaggeredGridLayoutManager.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ctx.dp(132)
+            layoutParams = RecyclerView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ctx.dp(120)
             )
             background = GradientDrawable().apply {
                 cornerRadius = radius
@@ -231,7 +269,7 @@ class ClipboardImageAdapter(
     }
 }
 
-/** Full-width section title ("最近" / "已固定") like Gboard's clipboard */
+/** Full-width section title ("最近" / "已固定" / "截图") like Gboard's clipboard */
 class SectionHeaderAdapter(
     private val theme: Theme,
     private val title: String
@@ -257,7 +295,7 @@ class SectionHeaderAdapter(
             textSize = 13f
             setTextColor(theme.candidateCommentColor)
             setPadding(ctx.dp(6), ctx.dp(8), ctx.dp(6), ctx.dp(4))
-            layoutParams = StaggeredGridLayoutManager.LayoutParams(-1, -2).apply { isFullSpan = true }
+            layoutParams = RecyclerView.LayoutParams(-1, -2)
         }
         return VH(tv)
     }

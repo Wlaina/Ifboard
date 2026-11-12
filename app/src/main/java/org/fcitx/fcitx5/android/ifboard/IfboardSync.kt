@@ -26,6 +26,9 @@ import java.util.concurrent.TimeUnit
 object IfboardSync {
 
     const val REPO = "Wlaina/Ifboard"
+    const val URL_KOOFR = "https://app.koofr.net/dav/Koofr"
+    const val URL_JIANGUOYUN = "https://dav.jianguoyun.com/dav/"
+    const val DEFAULT_WEBDAV_URL = URL_KOOFR
 
     data class Result(val uploaded: Int, val downloaded: Int, val devices: List<String>)
 
@@ -62,11 +65,14 @@ object IfboardSync {
         private fun req(url: String) = Request.Builder().url(url).header("Authorization", Credentials.basic(user, pass))
 
         fun mkcol(path: String) {
-            http.newCall(req(root + path.trimEnd('/') + "/").method("MKCOL", null).build()).execute().close()
+            http.newCall(req(root + path.trimEnd('/') + "/").method("MKCOL", null).build()).execute().use {
+                if (it.code == 401) error("账号或密码不对")
+            }
         }
 
         fun put(path: String, bytes: ByteArray) {
             http.newCall(req(root + path).put(bytes.toRequestBody("text/plain".toMediaType())).build()).execute().use {
+                if (it.code == 401) error("账号或密码不对")
                 if (!it.isSuccessful) error("上传失败（${it.code}）")
             }
         }
@@ -77,34 +83,80 @@ object IfboardSync {
         /** names of direct children; folders end with "/" */
         fun list(path: String): List<String> {
             val body = """<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>"""
-            val url = root + path.trimEnd('/') + "/"
+            val clean = path.trim('/')
+            val url = if (clean.isEmpty()) root else "$root$clean/"
             http.newCall(
                 req(url).header("Depth", "1").method("PROPFIND", body.toRequestBody("application/xml".toMediaType())).build()
             ).execute().use { resp ->
                 if (resp.code == 401) error("账号或密码不对")
                 if (!resp.isSuccessful) return emptyList()
                 val xml = resp.body?.string().orEmpty()
-                val hrefs = Regex("<(?:\\w+:)?href>([^<]+)</(?:\\w+:)?href>").findAll(xml).map { it.groupValues[1] }.toList()
-                val self = java.net.URI(url).path
-                return hrefs.map { java.net.URLDecoder.decode(it, "UTF-8") }
-                    .map { if (it.startsWith("http")) java.net.URI(it).path else it }
-                    .filter { it.trimEnd('/') != self.trimEnd('/') }
-                    .map { it.trimEnd('/').substringAfterLast('/') + if (it.endsWith("/")) "/" else "" }
+                val self = runCatching {
+                    java.net.URLDecoder.decode(java.net.URI(url).rawPath, "UTF-8")
+                }.getOrDefault(java.net.URI(url).path).trimEnd('/')
+                val parser = android.util.Xml.newPullParser().apply {
+                    setFeature(org.xmlpull.v1.XmlPullParser.FEATURE_PROCESS_NAMESPACES, true)
+                    setInput(xml.reader())
+                }
+                val out = mutableListOf<String>()
+                var inResponse = false
+                var href: String? = null
+                var isCollection = false
+                var event = parser.eventType
+                while (event != org.xmlpull.v1.XmlPullParser.END_DOCUMENT) {
+                    when (event) {
+                        org.xmlpull.v1.XmlPullParser.START_TAG -> when (parser.name.lowercase()) {
+                            "response" -> {
+                                inResponse = true
+                                href = null
+                                isCollection = false
+                            }
+                            "href" -> if (inResponse) href = parser.nextText().trim()
+                            "collection" -> if (inResponse) isCollection = true
+                        }
+                        org.xmlpull.v1.XmlPullParser.END_TAG -> if (parser.name.lowercase() == "response" && inResponse) {
+                            inResponse = false
+                            val raw = href
+                            if (!raw.isNullOrBlank()) {
+                                val decoded = runCatching { java.net.URLDecoder.decode(raw, "UTF-8") }.getOrDefault(raw)
+                                val pathOnly = if (decoded.startsWith("http")) {
+                                    runCatching { java.net.URI(decoded).path }.getOrDefault(decoded)
+                                } else {
+                                    decoded
+                                }
+                                val trimmed = pathOnly.trimEnd('/')
+                                if (trimmed != self && trimmed.isNotEmpty()) {
+                                    val name = trimmed.substringAfterLast('/')
+                                    if (name.isNotEmpty()) {
+                                        val dir = isCollection || pathOnly.endsWith("/")
+                                        out += if (dir) "$name/" else name
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    event = parser.next()
+                }
+                return out.distinct()
             }
         }
     }
 
     suspend fun webdavSync(ctx: Context, url: String, user: String, pass: String, dir: String): Result =
         withContext(Dispatchers.IO) {
-            require(url.startsWith("http")) { "请先填写 WebDAV 地址" }
+            val cleanUrl = url.trim().ifEmpty { DEFAULT_WEBDAV_URL }
+            require(cleanUrl.startsWith("http")) { "请先填写 WebDAV 地址" }
+            require(user.isNotBlank() && pass.isNotBlank()) { "请先填写 WebDAV 账号和密码" }
             val id = installationId(ctx) ?: error("还没有生成本机的 Rime 设备号，请先打一会儿字")
             rimeSync()
-            val dav = Dav(url, user, pass)
+            val dav = Dav(cleanUrl, user, pass)
             val base = dir.trim('/').ifEmpty { "Ifboard" }
             dav.mkcol(base)
             dav.mkcol("$base/$id")
             // upload this device's snapshot
-            val mine = File(rimeDir(ctx), "sync/$id").listFiles { f -> f.name.endsWith(".userdb.txt") } ?: emptyArray()
+            val mine = File(rimeDir(ctx), "sync/$id")
+                .listFiles { f -> f.isFile && f.name.endsWith(".userdb.txt") && f.canRead() }
+                ?: emptyArray()
             mine.forEach { dav.put("$base/$id/${it.name}", it.readBytes()) }
             // download other devices
             var down = 0
@@ -112,8 +164,10 @@ object IfboardSync {
             devices.forEach { dev ->
                 dav.list("$base/$dev").filter { it.endsWith(".userdb.txt") }.forEach { name ->
                     dav.get("$base/$dev/$name")?.let { bytes ->
-                        File(rimeDir(ctx), "sync/$dev").mkdirs()
-                        File(rimeDir(ctx), "sync/$dev/$name").writeBytes(bytes)
+                        val dirDev = File(rimeDir(ctx), "sync/$dev").apply { mkdirs() }
+                        val target = File(dirDev, name)
+                        if (target.exists() && !target.canWrite()) target.delete()
+                        target.writeBytes(bytes)
                         down++
                     }
                 }

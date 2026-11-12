@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
@@ -252,6 +253,13 @@ abstract class KeyView(ctx: Context, val theme: Theme, val def: KeyDef.Appearanc
     }
 }
 
+internal fun Paint.applyKeycapStroke(density: Float, weightDp: Float = 0.28f) {
+    style = Paint.Style.FILL_AND_STROKE
+    strokeJoin = Paint.Join.ROUND
+    strokeCap = Paint.Cap.ROUND
+    strokeWidth = density * weightDp
+}
+
 @SuppressLint("ViewConstructor")
 open class TextKeyView(ctx: Context, theme: Theme, def: KeyDef.Appearance.Text) :
     KeyView(ctx, theme, def) {
@@ -262,8 +270,9 @@ open class TextKeyView(ctx: Context, theme: Theme, def: KeyDef.Appearance.Text) 
         text = def.displayText
         setTextSize(TypedValue.COMPLEX_UNIT_DIP, def.textSize)
         textDirection = View.TEXT_DIRECTION_FIRST_STRONG_LTR
-        // Gboard style: Google Sans
+        // Gboard style: Google Sans with subtle stroke weight matching Gboard's optical medium
         setTypeface(GboardFont.get(context) ?: typeface, def.textStyle)
+        paint.applyKeycapStroke(context.resources.displayMetrics.density, if (def.textSize <= 14f) 0.15f else 0.28f)
         setTextColor(
             when (def.variant) {
                 Variant.Normal -> theme.keyTextColor
@@ -309,18 +318,14 @@ open class TextKeyView(ctx: Context, theme: Theme, def: KeyDef.Appearance.Text) 
 @SuppressLint("ViewConstructor")
 class AltTextKeyView(ctx: Context, theme: Theme, def: KeyDef.Appearance.AltText) :
     TextKeyView(ctx, theme, def) {
-    init {
-        // Gboard letters are ~6% narrower than Google Sans at this optical size
-        mainText.textScaleX = 0.94f
-    }
 
     val altText = view(::AutoScaleTextView) {
         isClickable = false
         isFocusable = false
-        // TODO hardcoded alt text size
-        // Gboard style hint: small, regular weight, muted color
-        setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12f)
+        // Gboard style hint: crisp numeric hint weight
+        setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12.5f)
         setTypeface(GboardFont.get(context) ?: typeface, Typeface.NORMAL)
+        paint.applyKeycapStroke(context.resources.displayMetrics.density, 0.20f)
         text = def.altText
         textDirection = View.TEXT_DIRECTION_FIRST_STRONG_LTR
         setTextColor(
@@ -339,6 +344,8 @@ class AltTextKeyView(ctx: Context, theme: Theme, def: KeyDef.Appearance.AltText)
     }
 
     private fun applyTopRightAltTextPosition() {
+        val hint = (def as KeyDef.Appearance.AltText).altText
+        val hasDigitHint = hint.length == 1 && hint[0].isDigit()
         mainText.updateLayoutParams<ConstraintLayout.LayoutParams> {
             // reset
             topMargin = 0
@@ -346,17 +353,19 @@ class AltTextKeyView(ctx: Context, theme: Theme, def: KeyDef.Appearance.AltText)
             // set
             topToTop = parentId
             bottomToBottom = parentId
+            // 给右上角数字提示留出安全间距，避免开启大写锁定时与大写字母（如 Q/W/O/U）撞在一起
+            verticalBias = if (hasDigitHint) 0.57f else 0.5f
         }
         // Gboard style: only show digit hints (number row); symbols stay reachable by swipe / long press
-        val hint = (def as KeyDef.Appearance.AltText).altText
-        altText.visibility = if (hint.length == 1 && hint[0].isDigit()) View.VISIBLE else View.GONE
+        altText.visibility = if (hasDigitHint) View.VISIBLE else View.GONE
+        altText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 10.5f)
         altText.updateLayoutParams<ConstraintLayout.LayoutParams> {
             // reset
             bottomToBottom = unset; bottomMargin = 0
             // set
-            topToTop = parentId; topMargin = vMargin + dp(1)
+            topToTop = parentId; topMargin = vMargin + dp(1.5f).toInt()
             leftToLeft = unset
-            rightToRight = parentId; rightMargin = hMargin + dp(5)
+            rightToRight = parentId; rightMargin = hMargin + dp(4)
         }
     }
 
@@ -364,11 +373,13 @@ class AltTextKeyView(ctx: Context, theme: Theme, def: KeyDef.Appearance.AltText)
         mainText.updateLayoutParams<ConstraintLayout.LayoutParams> {
             // reset
             bottomToBottom = unset
+            verticalBias = 0.5f
             // set
             topToTop = parentId; topMargin = vMargin
             bottomToTop = altText.existingOrNewId
         }
         altText.visibility = View.VISIBLE
+        altText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 11.5f)
         altText.updateLayoutParams<ConstraintLayout.LayoutParams> {
             // reset
             topToTop = unset; topMargin = 0
@@ -385,6 +396,7 @@ class AltTextKeyView(ctx: Context, theme: Theme, def: KeyDef.Appearance.AltText)
             // reset
             topMargin = 0
             bottomToTop = unset
+            verticalBias = 0.5f
             // set
             topToTop = parentId
             bottomToBottom = parentId

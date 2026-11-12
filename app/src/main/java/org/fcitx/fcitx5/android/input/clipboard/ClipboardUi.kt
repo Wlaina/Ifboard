@@ -30,16 +30,26 @@ import timber.log.Timber
 
 class ClipboardUi(override val ctx: Context, private val theme: Theme) : Ui {
 
-    val recyclerView = recyclerView {
+    val textRecyclerView = recyclerView {
         addItemDecoration(SpacesItemDecoration(dp(4)))
+    }
+
+    val imageRecyclerView = recyclerView {
+        addItemDecoration(SpacesItemDecoration(dp(4)))
+        visibility = View.GONE
+    }
+
+    val columnsContainer = horizontalLayout {
+        add(textRecyclerView, lParams(0, matchParent) { weight = 1f })
+        add(imageRecyclerView, lParams(0, matchParent) { weight = 1f })
     }
 
     val enableUi = ClipboardInstructionUi.Enable(ctx, theme)
 
     val emptyUi = ClipboardInstructionUi.Empty(ctx, theme)
 
-    val viewAnimator =  view(::ViewAnimator) {
-        add(recyclerView, lParams(matchParent, matchParent))
+    val viewAnimator = view(::ViewAnimator) {
+        add(columnsContainer, lParams(matchParent, matchParent))
         add(emptyUi.root, lParams(matchParent, matchParent))
         add(enableUi.root, lParams(matchParent, matchParent))
     }
@@ -60,13 +70,14 @@ class ClipboardUi(override val ctx: Context, private val theme: Theme) : Ui {
 
     // Gboard style: clipboard on/off switch next to the action button
     val listeningSwitch = android.widget.Switch(ctx).apply {
-        thumbTintList = android.content.res.ColorStateList(
-            arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-            intArrayOf(theme.genericActiveForegroundColor, theme.altKeyTextColor)
-        )
-        trackTintList = android.content.res.ColorStateList(
-            arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-            intArrayOf(theme.genericActiveBackgroundColor, theme.keyBackgroundColor)
+        val isLightTheme = androidx.core.graphics.ColorUtils.calculateLuminance(theme.keyTextColor) < 0.5
+        val uncheckedTrack = if (isLightTheme) 0xFFD4CBC0.toInt() else 0xFF54534D.toInt()
+        val thumbColor = if (isLightTheme) android.graphics.Color.WHITE else 0xFFFAF9F5.toInt()
+        org.fcitx.fcitx5.android.ui.common.WarmPaperUi.applyPillSwitchDrawables(
+            this,
+            activeTrackColor = theme.genericActiveBackgroundColor,
+            inactiveTrackColor = uncheckedTrack,
+            thumbColor = thumbColor
         )
         contentDescription = "剪贴板开关"
     }
@@ -83,10 +94,11 @@ class ClipboardUi(override val ctx: Context, private val theme: Theme) : Ui {
 
     private var lastState: ClipboardStateMachine.State? = null
 
-    /** Gboard style: keep the grid visible when there are screenshots even if no text entries */
+    /** Gboard style: separate text and screenshot columns when screenshots are present */
     var hasImages = false
         set(value) {
             field = value
+            imageRecyclerView.visibility = if (value) View.VISIBLE else View.GONE
             lastState?.let { switchUiByState(it, animate = false) }
         }
 
@@ -102,7 +114,7 @@ class ClipboardUi(override val ctx: Context, private val theme: Theme) : Ui {
             }
             ClipboardStateMachine.State.AddMore -> {
                 viewAnimator.displayedChild = if (hasImages) 0 else 1
-                setDeleteButtonShown(false)
+                setDeleteButtonShown(hasImages)
             }
             ClipboardStateMachine.State.EnableListening -> {
                 viewAnimator.displayedChild = 2

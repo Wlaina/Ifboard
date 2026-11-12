@@ -4,8 +4,11 @@
  */
 package org.fcitx.fcitx5.android.ui.main.settings.theme
 
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.LayerDrawable
 import android.os.Build
 import android.os.Bundle
+import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -20,9 +23,8 @@ import com.google.android.material.tabs.TabLayoutMediator
 import kotlinx.coroutines.launch
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.data.theme.ThemeManager
+import org.fcitx.fcitx5.android.ui.common.WarmPaperUi
 import splitties.dimensions.dp
-import org.fcitx.fcitx5.android.utils.styledColorCompat
-import splitties.views.backgroundColor
 import splitties.views.dsl.constraintlayout.below
 import splitties.views.dsl.constraintlayout.bottomOfParent
 import splitties.views.dsl.constraintlayout.centerHorizontally
@@ -64,7 +66,12 @@ class ThemeFragment : Fragment() {
             elevation = dp(4f)
         }
 
-        tabLayout = TabLayout(this)
+        val p = WarmPaperUi.palette(this)
+        tabLayout = TabLayout(this).apply {
+            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            setTabTextColors(p.textSecondary, p.brandInk)
+            setSelectedTabIndicatorColor(p.brand)
+        }
 
         viewPager = ViewPager2(this).apply {
             adapter = object : FragmentStateAdapter(this@ThemeFragment) {
@@ -95,8 +102,16 @@ class ThemeFragment : Fragment() {
                 centerHorizontally()
                 bottomOfParent()
             })
-            backgroundColor = styledColorCompat(android.R.attr.colorPrimary)
-            elevation = dp(4f)
+            background = LayerDrawable(
+                arrayOf(
+                    GradientDrawable().apply { setColor(p.cardBg) },
+                    GradientDrawable().apply { setColor(p.borderStrong) }
+                )
+            ).apply {
+                setLayerGravity(1, Gravity.BOTTOM or Gravity.FILL_HORIZONTAL)
+                setLayerHeight(1, maxOf(1, dp(1)))
+            }
+            elevation = 0f
         }
 
         constraintLayout {

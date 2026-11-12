@@ -23,6 +23,7 @@ import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.core.Key
 import org.fcitx.fcitx5.android.core.RawConfig
 import org.fcitx.fcitx5.android.data.prefs.AppPrefs
+import org.fcitx.fcitx5.android.ui.common.showWarm
 import org.fcitx.fcitx5.android.ui.main.modified.MySwitchPreference
 import org.fcitx.fcitx5.android.utils.LongClickPreference
 import org.fcitx.fcitx5.android.utils.buildDocumentsProviderIntent
@@ -145,7 +146,8 @@ object PreferenceScreenFactory {
                             context.toast(e)
                         }
                     }
-                    .show()
+                    .create()
+                    .showWarm()
                 true
             }
 
@@ -260,6 +262,20 @@ object PreferenceScreenFactory {
             isSingleLineTitle = false
             isIconSpaceReserved = false
             preferenceDataStore = store
+            val tip = descriptor.tooltip?.trim()
+            if (!tip.isNullOrEmpty()) {
+                val prev = summaryProvider
+                if (prev != null) {
+                    @Suppress("UNCHECKED_CAST")
+                    val orig = prev as SummaryProvider<Preference>
+                    summaryProvider = SummaryProvider<Preference> { pref ->
+                        val cur = orig.provideSummary(pref)?.toString()?.trim()
+                        if (cur.isNullOrEmpty()) tip else "$cur\n$tip"
+                    }
+                } else if (summary.isNullOrBlank()) {
+                    summary = tip
+                }
+            }
             if (this is DialogPreference) {
                 dialogTitle = title
                 dialogMessage = descriptor.tooltip

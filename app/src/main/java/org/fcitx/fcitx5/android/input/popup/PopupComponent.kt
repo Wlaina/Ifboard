@@ -125,14 +125,15 @@ class PopupComponent :
     private fun animateContainerIn(ui: PopupContainerUi) {
         if (disableAnimation) return
         val v = ui.root
+        val belowTrigger = ui.offsetY >= 0
         v.alpha = 0f
         v.scaleX = 0.7f
         v.scaleY = 0.55f
-        v.translationY = context.dp(10f)
+        v.translationY = context.dp(if (belowTrigger) -10f else 10f)
         androidx.core.view.OneShotPreDrawListener.add(v) {
-            // grow from the trigger key: horizontally its center, vertically the bottom edge
+            // grow from the trigger key: horizontally its center, vertically edge closest to trigger
             v.pivotX = (ui.triggerBounds.width() / 2f - ui.offsetX).coerceIn(0f, v.width.toFloat())
-            v.pivotY = v.height.toFloat()
+            v.pivotY = if (belowTrigger) 0f else v.height.toFloat()
         }
         v.animate()
             .alpha(1f).scaleX(1f).scaleY(1f).translationY(0f)
@@ -286,6 +287,29 @@ class PopupComponent :
         showPopupContainer(viewId, menuUi)
     }
 
+    private fun showChoice(
+        viewId: Int,
+        items: List<String>,
+        bounds: Rect,
+        initialIndex: Int,
+        onSelect: (Int) -> Unit
+    ) {
+        showingEntryUi[viewId]?.let {
+            dismissPopupEntry(viewId, it)
+        }
+        val choiceUi = PopupChoiceMenuUi(
+            context,
+            theme,
+            rootBounds,
+            bounds,
+            { dismissPopup(viewId) },
+            items,
+            initialIndex,
+            onSelect,
+        )
+        showPopupContainer(viewId, choiceUi)
+    }
+
     private fun showPopupContainer(viewId: Int, ui: PopupContainerUi) {
         showScrim()
         root.apply {
@@ -367,6 +391,7 @@ class PopupComponent :
                 is PopupAction.PreviewUpdateAction -> updatePopup(viewId, content)
                 is PopupAction.ShowKeyboardAction -> showKeyboard(viewId, keyboard, bounds)
                 is PopupAction.ShowMenuAction -> showMenu(viewId, menu, bounds)
+                is PopupAction.ShowChoiceAction -> showChoice(viewId, items, bounds, initialIndex, onSelect)
                 is PopupAction.TriggerAction -> outAction = triggerFocused(viewId)
             }
         }

@@ -119,7 +119,9 @@ class InputView(
     }
 
     val translatePanel by lazy {
-        org.fcitx.fcitx5.android.input.inline.TranslatePanel(themedContext, theme, service, service.lifecycleScope)
+        org.fcitx.fcitx5.android.input.inline.TranslatePanel(themedContext, theme, service, service.lifecycleScope).apply {
+            popupListener = popup.listener
+        }
     }
 
     val voiceBar by lazy {

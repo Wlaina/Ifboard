@@ -5,7 +5,6 @@
 package org.fcitx.fcitx5.android.ui.main
 
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuInflater
@@ -20,7 +19,6 @@ import androidx.preference.PreferenceCategory
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.ui.common.PaddingPreferenceFragment
 import org.fcitx.fcitx5.android.ui.main.settings.SettingsRoute
-import org.fcitx.fcitx5.android.utils.Const
 import org.fcitx.fcitx5.android.utils.addCategory
 import org.fcitx.fcitx5.android.utils.addPreference
 import org.fcitx.fcitx5.android.utils.item
@@ -44,7 +42,7 @@ class MainFragment : PaddingPreferenceFragment() {
     private inner class AboutMenuProvider : MenuProvider {
         override fun onCreateMenu(menu: Menu, menuInflater: MenuInflater) {
             menu.item(R.string.faq) {
-                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(Const.faqUrl)))
+                navigateWithAnim(SettingsRoute.Faq)
             }
             menu.item(R.string.developer) {
                 navigateWithAnim(SettingsRoute.Developer)
@@ -69,17 +67,16 @@ class MainFragment : PaddingPreferenceFragment() {
 
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         preferenceScreen = preferenceManager.createPreferenceScreen(requireContext()).apply {
-            addCategory("Ifboard") {
+            addCategory("词库与云端") {
                 addPreference(Preference(requireContext()).apply {
                     title = "同步与更新"
-                    summary = "WebDAV 同步词库，检查新版本"
                     setIcon(R.drawable.ic_baseline_sync_24)
                     setOnPreferenceClickListener {
                         startActivity(Intent(requireContext(), org.fcitx.fcitx5.android.ifboard.IfboardActivity::class.java)); true
                     }
                 })
             }
-            addCategory("Fcitx") {
+            addCategory("输入与引擎") {
                 addDestinationPreference(
                     R.string.global_options,
                     R.drawable.ic_baseline_tune_24,
@@ -96,7 +93,7 @@ class MainFragment : PaddingPreferenceFragment() {
                     SettingsRoute.AddonList
                 )
             }
-            addCategory("Android") {
+            addCategory("外观与系统") {
                 addDestinationPreference(
                     R.string.theme,
                     R.drawable.ic_baseline_palette_24,

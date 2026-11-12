@@ -22,6 +22,7 @@ import org.fcitx.fcitx5.android.input.dependency.fcitx
 import org.fcitx.fcitx5.android.input.dependency.inputMethodService
 import org.fcitx.fcitx5.android.input.dependency.theme
 import org.fcitx.fcitx5.android.input.picker.PickerWindow
+import org.fcitx.fcitx5.android.input.preedit.PreeditComponent
 import org.fcitx.fcitx5.android.input.popup.PopupActionListener
 import org.fcitx.fcitx5.android.input.popup.PopupComponent
 import org.fcitx.fcitx5.android.input.wm.EssentialWindow
@@ -43,6 +44,7 @@ class KeyboardWindow : InputWindow.SimpleInputWindow<KeyboardWindow>(), Essentia
     private val windowManager: InputWindowManager by manager.must()
     private val popup: PopupComponent by manager.must()
     private val bar: KawaiiBarComponent by manager.must()
+    private val preedit: PreeditComponent by manager.must()
     private val returnKeyDrawable: ReturnKeyDrawableComponent by manager.must()
 
     companion object : EssentialWindow.Key
@@ -88,6 +90,19 @@ class KeyboardWindow : InputWindow.SimpleInputWindow<KeyboardWindow>(), Essentia
     }
 
     private val keyActionListener = KeyActionListener { it, source ->
+        when (it) {
+            is KeyAction.GlidePreviewAction -> {
+                preedit.showGlidePreview(it.code)
+                bar.showGlideCandidates(it.candidates)
+                return@KeyActionListener
+            }
+            is KeyAction.GlidePreviewClearAction -> {
+                preedit.showGlidePreview("")
+                bar.clearGlideCandidates()
+                return@KeyActionListener
+            }
+            else -> {}
+        }
         if (englishAssist.beforeKeyAction(it)) return@KeyActionListener
         if (it is KeyAction.GlideWordAction) {
             // Gboard: a glided word gets a space in front when it follows another word
@@ -198,6 +213,8 @@ class KeyboardWindow : InputWindow.SimpleInputWindow<KeyboardWindow>(), Essentia
     }
 
     override fun onDetached() {
+        preedit.showGlidePreview("")
+        bar.clearGlideCandidates()
         currentKeyboard?.let {
             it.onDetach()
             it.keyActionListener = null

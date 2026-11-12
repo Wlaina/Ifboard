@@ -39,7 +39,19 @@ class PreeditComponent : UniqueComponent<PreeditComponent>(), Dependent, InputBr
         }
     }
 
+    private var glidePreviewing = false
+
+    fun showGlidePreview(text: String) {
+        glidePreviewing = text.isNotEmpty()
+        ui.updateOverride(text)
+        ui.root.visibility = if (ui.visible) View.VISIBLE else View.INVISIBLE
+    }
+
     override fun onInputPanelUpdate(data: FcitxEvent.InputPanelEvent.Data) {
+        if (glidePreviewing && data.preedit.isEmpty() && data.auxUp.isEmpty() && data.auxDown.isEmpty()) {
+            return
+        }
+        glidePreviewing = false
         ui.update(data)
         ui.root.visibility = if (ui.visible) View.VISIBLE else View.INVISIBLE
     }

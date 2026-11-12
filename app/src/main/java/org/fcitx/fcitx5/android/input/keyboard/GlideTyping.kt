@@ -1,18 +1,12 @@
 /*
  * SPDX-License-Identifier: LGPL-2.1-or-later
- * Ifboard: Gboard style glide typing (shape writing).
- *
- * Decoding follows the published SHARK2 idea (Kristensson & Zhai, 2004), the same family of
- * algorithms used by FlorisBoard's StatisticalGlideTypingClassifier: the gesture and the ideal
- * key-center path of every candidate word are resampled to the same number of points, then
- * compared by absolute location and by normalized shape, combined with a word frequency prior.
- * Candidates are pruned by the keys near the start and end of the gesture.
+ * Ifboard: High-accuracy Gboard style glide typing (Banded DTW + Monotonic Key Alignment + Trace Coverage).
  *
  * Word lists come from the rime-ice data already bundled in the APK:
- *  - Pinyin: cn_dicts/8105 (single characters) + cn_dicts/base (2-4 character words), as full
- *    pinyin letters (rime_ice) or with each syllable converted to its 小鹤双拼 key pair
- *    (double_pinyin_flypy)
- *  - English: en_dicts/en (~21k words), with a small built-in boost list of very common words
+ *  - Pinyin: cn_dicts/8105 (single characters, rank-normalized) + cn_dicts/base (2-4 character words),
+ *    as full pinyin letters (rime_ice) or with each syllable converted to its 小鹤双拼 key pair
+ *    (double_pinyin_flypy, also storing top Chinese words for typo correction & live preview)
+ *  - English: en_dicts/en (~21k words), with a boost list of very common words
  */
 package org.fcitx.fcitx5.android.input.keyboard
 
@@ -21,7 +15,9 @@ import timber.log.Timber
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.util.PriorityQueue
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.ln
 import kotlin.math.max
@@ -34,30 +30,46 @@ object GlideTyping {
 
     class Result(val code: String, val output: String, val score: Float)
 
+    class IdealPath(
+        val keys: IntArray,
+        val kpts: FloatArray,
+        val soft: FloatArray,
+        val us: FloatArray,
+        val un: FloatArray,
+        val iLen: Float,
+        val minX: Float,
+        val maxX: Float,
+        val minY: Float,
+        val maxY: Float
+    )
+
     /** key centers in pixels (index 0..25 = a..z), plus the typical key size */
     class Geometry(val cx: FloatArray, val cy: FloatArray, val present: BooleanArray, val keyW: Float, val keyH: Float) {
-        internal val cache = HashMap<String, FloatArray>()
+        internal val cache = ConcurrentHashMap<String, IdealPath>()
+        val hRatio: Float = if (keyW > 0f) keyH / keyW else 1.35f
+        val normCx = FloatArray(26) { cx[it] / keyW.coerceAtLeast(1f) }
+        val normCy = FloatArray(26) { cy[it] / keyW.coerceAtLeast(1f) }
     }
 
-    private class Dict(
+    internal class Dict(
         val codes: Array<String>,
         val outputs: Array<String>,
         val freq: FloatArray,
-        val index: HashMap<Int, IntArray>
+        val index: HashMap<Int, IntArray>,
+        val codeToIdx: HashMap<String, Int>? = null,
+        val validSyllables: HashSet<String>? = null
     )
 
-    private const val N = 48
-    private const val S_LOC = 0.5f
-    private const val S_SHP = 0.10f
-    private const val ALPHA = 0.6f
-    private const val NEAR = 1.1f
-    private const val END_W = 2f
+    private const val M = 28
+    private const val DTW_BAND = 5
+    private const val NEAR = 1.65f
 
     @Volatile
     private var pinyin: Dict? = null
 
     @Volatile
-    private var flypy: Dict? = null
+    internal var flypyDict: Dict? = null
+        private set
 
     @Volatile
     private var english: Dict? = null
@@ -66,15 +78,13 @@ object GlideTyping {
 
     fun isReady(mode: Mode) = when (mode) {
         Mode.Pinyin -> pinyin != null
-        Mode.Flypy -> flypy != null
+        Mode.Flypy -> flypyDict != null
         Mode.English -> english != null
     }
 
-    /** load the word list for [mode] in background, no-op if already loaded or loading */
     /** run [block] on the loader thread once [mode]'s word list is loaded (immediately if it is) */
     fun whenReady(context: Context, mode: Mode, block: () -> Unit) {
         prepare(context, mode)
-        // the loader is a single thread: this runs after the pending load has finished
         executor.execute { if (isReady(mode)) block() }
     }
 
@@ -87,7 +97,7 @@ object GlideTyping {
             runCatching {
                 when (mode) {
                     Mode.Pinyin -> pinyin = loadPinyin(app, false)
-                    Mode.Flypy -> flypy = loadPinyin(app, true)
+                    Mode.Flypy -> flypyDict = loadPinyin(app, true)
                     Mode.English -> english = loadEnglish(app)
                 }
             }.onFailure { Timber.w(it, "glide dictionary $mode failed to load") }
@@ -101,7 +111,6 @@ object GlideTyping {
     private fun openDict(context: Context, path: String) =
         BufferedReader(InputStreamReader(context.assets.open("usr/share/rime-data/$path"), Charsets.UTF_8), 1 shl 16)
 
-    /** iterate the body (after "...") of a rime dict.yaml */
     private inline fun forEachEntry(context: Context, path: String, block: (List<String>) -> Unit) {
         openDict(context, path).use { r ->
             var body = false
@@ -146,45 +155,77 @@ object GlideTyping {
         return flypyFinals[fin]?.let { ini + it }
     }
 
+    private fun rimePrior(weight: Long, rank: Int, isSingle: Boolean): Float {
+        if (isSingle) {
+            // 8105.dict.yaml uses a different scale (up to 80M); normalize by rank into [7.5 .. 12.8]
+            // so straight 2-key singles (的/上/你) win cleanly against collinear 3-key repeats (南极 njji)
+            return 12.8f - 0.80f * ln(1f + rank / 35f)
+        }
+        var base = ln(max(weight, 1L).toFloat() + 1f)
+        if (weight > 500_000L) {
+            base += 0.42f * ln(1f + (weight - 500_000L).toFloat() / 120f)
+        }
+        return base
+    }
+
     private fun loadPinyin(context: Context, doublePinyin: Boolean): Dict {
-        class W(val weight: Long, val syllables: List<String>)
+        class W(val weight: Long, val word: String, val syllables: List<String>)
         val singles = ArrayList<W>(12000)
         val words = ArrayList<W>(400000)
         forEachEntry(context, "cn_dicts/8105.dict.yaml") { p ->
-            if (p.size >= 3) singles.add(W(p[2].trim().toLongOrNull() ?: 0, listOf(p[1].trim())))
+            if (p.size >= 3) singles.add(W(p[2].trim().toLongOrNull() ?: 0L, p[0].trim(), listOf(p[1].trim())))
         }
         forEachEntry(context, "cn_dicts/base.dict.yaml") { p ->
             if (p.size < 3) return@forEachEntry
             val sy = p[1].split(' ')
             if (sy.size !in 2..4) return@forEachEntry
-            words.add(W(p[2].trim().toLongOrNull() ?: 0, sy))
+            words.add(W(p[2].trim().toLongOrNull() ?: 0L, p[0].trim(), sy))
         }
         singles.sortByDescending { it.weight }
         words.sortByDescending { it.weight }
-        val best = HashMap<String, Long>(80000)
-        fun add(list: List<W>, limit: Int) {
-            var n = 0
-            for (w in list) {
-                if (n >= limit) break
-                n++
+
+        val bestPrior = HashMap<String, Float>(80000)
+        val bestWord = HashMap<String, String>(80000)
+        val syllables = if (doublePinyin) HashSet<String>(512) else null
+
+        fun add(list: List<W>, limit: Int, isSingle: Boolean) {
+            val maxN = min(limit, list.size)
+            for (rank in 0 until maxN) {
+                val w = list[rank]
+                val pr = rimePrior(w.weight, rank, isSingle)
                 val code = if (doublePinyin) {
-                    val sb = StringBuilder(8)
-                    for (s in w.syllables) sb.append(flypy(s) ?: break.also { sb.setLength(0) })
-                    if (sb.length != w.syllables.size * 2) continue
+                    val sb = StringBuilder(w.syllables.size * 2)
+                    var ok = true
+                    for (s in w.syllables) {
+                        val fp = flypy(s)
+                        if (fp == null) { ok = false; break }
+                        syllables?.add(fp)
+                        sb.append(fp)
+                    }
+                    if (!ok || sb.length != w.syllables.size * 2) continue
                     sb.toString()
                 } else {
                     val c = w.syllables.joinToString("")
                     if (c.length !in 2..18 || c.any { it !in 'a'..'z' }) continue
                     c
                 }
-                if ((best[code] ?: -1) < w.weight) best[code] = w.weight
+                val prev = bestPrior[code]
+                if (prev == null || pr > prev) {
+                    bestPrior[code] = pr
+                    bestWord[code] = w.word
+                }
             }
         }
-        add(singles, 4000)
-        add(words, 60000)
-        val codes = best.keys.toTypedArray()
-        val freq = FloatArray(codes.size) { ln(best[codes[it]]!!.toFloat() + 1f) }
-        return buildDict(codes, codes, freq)
+        add(singles, 4000, isSingle = true)
+        add(words, 60000, isSingle = false)
+
+        val codes = bestPrior.keys.toTypedArray()
+        val outputs = Array(codes.size) { bestWord[codes[it]] ?: codes[it] }
+        val freq = FloatArray(codes.size) { bestPrior[codes[it]]!! }
+        val codeToIdx = if (doublePinyin) {
+            HashMap<String, Int>(codes.size * 2).apply { codes.forEachIndexed { i, c -> put(c, i) } }
+        } else null
+        return buildDict(codes, outputs, freq, codeToIdx, syllables)
     }
 
     private val common = ("the of and to a in is it you that he was for on are with as i his they be at one have " +
@@ -197,7 +238,8 @@ object GlideTyping {
             "tell does set three want air well also play small end put home read hand port large spell add even land " +
             "here must big high such follow act why ask men change went light kind off need house picture try us " +
             "again animal point mother world near build self earth father hello thanks thank yes okay ok love happy " +
-            "sorry please really today tomorrow night morning going doing being got nice sure maybe").split(' ')
+            "sorry please really today tomorrow night morning going doing being got nice sure maybe " +
+            "translate google keyboard android message phone search friend school family").split(' ')
 
     private fun loadEnglish(context: Context): Dict {
         val outputs = LinkedHashMap<String, String>(24000)
@@ -212,19 +254,25 @@ object GlideTyping {
         val codes = outputs.keys.toTypedArray()
         val freq = FloatArray(codes.size) {
             val r = rank[codes[it]]
-            if (r != null) 10f - 3f * r / common.size else 6f - 0.15f * codes[it].length
+            if (r != null) 13f - 3.5f * r / common.size else 8.5f - 0.12f * codes[it].length
         }
         return buildDict(codes, Array(codes.size) { outputs[codes[it]]!! }, freq)
     }
 
-    private fun buildDict(codes: Array<String>, outputs: Array<String>, freq: FloatArray): Dict {
+    private fun buildDict(
+        codes: Array<String>,
+        outputs: Array<String>,
+        freq: FloatArray,
+        codeToIdx: HashMap<String, Int>? = null,
+        validSyllables: HashSet<String>? = null
+    ): Dict {
         val buckets = HashMap<Int, ArrayList<Int>>()
         codes.forEachIndexed { i, c ->
             buckets.getOrPut(bucket(c[0], c[c.length - 1])) { ArrayList() }.add(i)
         }
         val index = HashMap<Int, IntArray>(buckets.size)
         buckets.forEach { (k, v) -> index[k] = v.toIntArray() }
-        return Dict(codes, outputs, freq, index)
+        return Dict(codes, outputs, freq, index, codeToIdx, validSyllables)
     }
 
     private fun bucket(a: Char, b: Char) = (a - 'a') * 26 + (b - 'a')
@@ -237,22 +285,21 @@ object GlideTyping {
         return l
     }
 
-    /** resample a polyline of [n] points to [N] equidistant points */
     private fun resample(xy: FloatArray, n: Int): FloatArray {
-        val out = FloatArray(2 * N)
+        val out = FloatArray(2 * M)
         val total = pathLength(xy, n)
         if (n < 2 || total <= 0f) {
-            for (i in 0 until N) { out[2 * i] = xy[0]; out[2 * i + 1] = xy[1] }
+            for (i in 0 until M) { out[2 * i] = xy[0]; out[2 * i + 1] = xy[1] }
             return out
         }
-        val step = total / (N - 1)
+        val step = total / (M - 1)
         out[0] = xy[0]; out[1] = xy[1]
         var k = 1
         var acc = 0f
         var px = xy[0]
         var py = xy[1]
         var i = 1
-        while (i < n && k < N) {
+        while (i < n && k < M) {
             val qx = xy[2 * i]
             val qy = xy[2 * i + 1]
             val d = hypot(qx - px, qy - py)
@@ -269,31 +316,30 @@ object GlideTyping {
                 i++
             }
         }
-        while (k < N) {
+        while (k < M) {
             out[2 * k] = xy[2 * n - 2]; out[2 * k + 1] = xy[2 * n - 1]
             k++
         }
         return out
     }
 
-    /** translate to centroid and scale by the larger bounding box side (at least [minSide]) */
-    private fun normalize(p: FloatArray, minSide: Float): FloatArray {
+    private fun normalize(p: FloatArray, minSide: Float = 1.5f): FloatArray {
         var sx = 0f
         var sy = 0f
         var x0 = Float.MAX_VALUE
         var x1 = -Float.MAX_VALUE
         var y0 = Float.MAX_VALUE
         var y1 = -Float.MAX_VALUE
-        for (i in 0 until N) {
+        for (i in 0 until M) {
             val x = p[2 * i]
             val y = p[2 * i + 1]
             sx += x; sy += y
             x0 = min(x0, x); x1 = max(x1, x); y0 = min(y0, y); y1 = max(y1, y)
         }
-        val cx = sx / N
-        val cy = sy / N
+        val cx = sx / M
+        val cy = sy / M
         val s = max(max(x1 - x0, y1 - y0), minSide)
-        return FloatArray(2 * N) { if (it % 2 == 0) (p[it] - cx) / s else (p[it] - cy) / s }
+        return FloatArray(2 * M) { if (it % 2 == 0) (p[it] - cx) / s else (p[it] - cy) / s }
     }
 
     private fun keysOf(code: String, g: Geometry): IntArray? {
@@ -303,95 +349,275 @@ object GlideTyping {
             if (k !in 0..25 || !g.present[k]) return null
             if (keys.isEmpty() || keys.last() != k) keys.add(k)
         }
-        return keys.toIntArray()
+        return if (keys.size in 2..32) keys.toIntArray() else null
+    }
+
+    private fun buildIdealPath(code: String, g: Geometry): IdealPath? {
+        val keys = keysOf(code, g) ?: return null
+        val L = keys.size
+        val kpts = FloatArray(2 * L)
+        val soft = FloatArray(2 * L)
+        var minX = Float.MAX_VALUE; var maxX = -Float.MAX_VALUE
+        var minY = Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
+        for (j in 0 until L) {
+            val kx = g.normCx[keys[j]]
+            val ky = g.normCy[keys[j]]
+            kpts[2 * j] = kx; kpts[2 * j + 1] = ky
+            if (kx < minX) minX = kx; if (kx > maxX) maxX = kx
+            if (ky < minY) minY = ky; if (ky > maxY) maxY = ky
+        }
+        soft[0] = kpts[0]; soft[1] = kpts[1]
+        for (j in 1 until L - 1) {
+            soft[2 * j] = 0.84f * kpts[2 * j] + 0.08f * (kpts[2 * (j - 1)] + kpts[2 * (j + 1)])
+            soft[2 * j + 1] = 0.84f * kpts[2 * j + 1] + 0.08f * (kpts[2 * (j - 1) + 1] + kpts[2 * (j + 1) + 1])
+        }
+        soft[2 * L - 2] = kpts[2 * L - 2]; soft[2 * L - 1] = kpts[2 * L - 1]
+        val us = resample(soft, L)
+        val un = normalize(us, 1.5f)
+        val iLen = pathLength(kpts, L)
+        return IdealPath(keys, kpts, soft, us, un, iLen, minX, maxX, minY, maxY)
+    }
+
+    private fun pointToSegDist2(px: Float, py: Float, ax: Float, ay: Float, bx: Float, by: Float): Float {
+        val vx = bx - ax
+        val vy = by - ay
+        val l2 = vx * vx + vy * vy
+        if (l2 <= 1e-6f) {
+            val dx = px - ax; val dy = py - ay
+            return dx * dx + dy * dy
+        }
+        var t = ((px - ax) * vx + (py - ay) * vy) / l2
+        if (t < 0f) t = 0f else if (t > 1f) t = 1f
+        val dx = px - (ax + t * vx)
+        val dy = py - (ay + t * vy)
+        return dx * dx + dy * dy
+    }
+
+    private fun traceToIdealErr(gs: FloatArray, segPts: FloatArray, L: Int, step: Int): Float {
+        var sum = 0f
+        var cnt = 0
+        var gi = 0
+        while (gi < M) {
+            val px = gs[2 * gi]
+            val py = gs[2 * gi + 1]
+            var m2 = Float.MAX_VALUE
+            for (seg in 0 until L - 1) {
+                val d2 = pointToSegDist2(
+                    px, py,
+                    segPts[2 * seg], segPts[2 * seg + 1],
+                    segPts[2 * seg + 2], segPts[2 * seg + 3]
+                )
+                if (d2 < m2) m2 = d2
+            }
+            sum += sqrt(m2)
+            cnt++
+            gi += step
+        }
+        return if (cnt > 0) sum / cnt else 0f
+    }
+
+    /** 顺序受限动态规划：强制候选字母按顺序贴近滑行轨迹，避免乱序假阳性 */
+    private fun monotonicMiss(
+        kpts: FloatArray,
+        L: Int,
+        gs: FloatArray,
+        h: Float,
+        freeR: Float,
+        dpCur: FloatArray,
+        dpNext: FloatArray
+    ): Float {
+        val kx0 = kpts[0]; val ky0 = kpts[1]
+        for (i in 0 until M) dpCur[i] = 1e9f
+        for (i in 0 until min(3, M)) {
+            val d = hypot(gs[2 * i] - kx0, (gs[2 * i + 1] - ky0) / h)
+            val ex = max(0f, d - freeR)
+            dpCur[i] = ex * ex
+        }
+        for (j in 1 until L - 1) {
+            val kx = kpts[2 * j]; val ky = kpts[2 * j + 1]
+            var rmin = 1e9f
+            for (i in 0 until M) {
+                if (dpCur[i] < rmin) rmin = dpCur[i]
+                if (rmin < 1e8f) {
+                    val d = hypot(gs[2 * i] - kx, (gs[2 * i + 1] - ky) / h)
+                    val ex = max(0f, d - freeR)
+                    dpNext[i] = rmin + ex * ex
+                } else {
+                    dpNext[i] = 1e9f
+                }
+            }
+            System.arraycopy(dpNext, 0, dpCur, 0, M)
+        }
+        val kxl = kpts[2 * L - 2]; val kyl = kpts[2 * L - 1]
+        var best = 1e9f
+        var pmin = 1e9f
+        for (i in 0 until M) {
+            if (dpCur[i] < pmin) pmin = dpCur[i]
+            if (i >= M - 3 && pmin < 1e8f) {
+                val d = hypot(gs[2 * i] - kxl, (gs[2 * i + 1] - kyl) / h)
+                val ex = max(0f, d - freeR)
+                val cost = pmin + ex * ex
+                if (cost < best) best = cost
+            }
+        }
+        return best
+    }
+
+    /** 弹性时间规整（Banded DTW）：消除转角弧度导致的速度相位漂移 */
+    private fun bandedDtw(a: FloatArray, b: FloatArray, dpPrev: FloatArray, dpCur: FloatArray): Float {
+        for (j in 0 until M) dpPrev[j] = 1e9f
+        val ax0 = a[0]; val ay0 = a[1]
+        for (j in 0 until min(M, DTW_BAND + 1)) {
+            val d = hypot(ax0 - b[2 * j], ay0 - b[2 * j + 1])
+            dpPrev[j] = if (j == 0) d else dpPrev[j - 1] + d
+        }
+        for (i in 1 until M) {
+            for (j in 0 until M) dpCur[j] = 1e9f
+            val j0 = max(0, i - DTW_BAND)
+            val j1 = min(M - 1, i + DTW_BAND)
+            val ax = a[2 * i]; val ay = a[2 * i + 1]
+            for (j in j0..j1) {
+                val cost = hypot(ax - b[2 * j], ay - b[2 * j + 1])
+                var best = dpPrev[j]
+                if (j > j0 && dpCur[j - 1] < best) best = dpCur[j - 1]
+                if (j > 0 && dpPrev[j - 1] < best) best = dpPrev[j - 1]
+                dpCur[j] = best + cost
+            }
+            System.arraycopy(dpCur, 0, dpPrev, 0, M)
+        }
+        return dpPrev[M - 1] / M
     }
 
     // ---------------------------------------------------------------- decoding
 
-    /**
-     * @param xy gesture points (x0, y0, x1, y1, ...) in the same coordinate space as [g]
-     * @return up to [limit] best candidates, best first; empty if nothing plausible or not loaded yet
-     */
+    private class Coarse(val id: Int, val ideal: IdealPath, val endPen: Float, val coarseScore: Float)
+
     fun decode(xy: FloatArray, n: Int, g: Geometry, mode: Mode, limit: Int = 5): List<Result> {
         val dict = when (mode) {
             Mode.Pinyin -> pinyin
-            Mode.Flypy -> flypy
+            Mode.Flypy -> flypyDict
             Mode.English -> english
         } ?: return emptyList()
         if (n < 2) return emptyList()
         val unit = g.keyW
-        val h = g.keyH / g.keyW
-        // work in key-width units
-        val pts = FloatArray(2 * n) { xy[it] / unit }
-        val gs = resample(pts, n)
-        val gn = normalize(gs, 1f)
-        val gLen = pathLength(pts, n)
-        val cx = FloatArray(26) { g.cx[it] / unit }
-        val cy = FloatArray(26) { g.cy[it] / unit }
+        if (unit <= 0f) return emptyList()
+        val h = g.hRatio
 
-        fun near(x: Float, y: Float): List<Int> = (0 until 26).filter {
-            if (!g.present[it]) return@filter false
-            val dx = cx[it] - x
-            val dy = (cy[it] - y) / h
-            dx * dx + dy * dy <= NEAR * NEAR
+        val pts = FloatArray(2 * n) { xy[it] / unit }
+        val gLen = pathLength(pts, n)
+        if (gLen < 0.25f) return emptyList()
+
+        val gs = resample(pts, n)
+        val gn = normalize(gs, 1.5f)
+        var gx0 = Float.MAX_VALUE; var gx1 = -Float.MAX_VALUE
+        var gy0 = Float.MAX_VALUE; var gy1 = -Float.MAX_VALUE
+        for (i in 0 until n) {
+            val px = pts[2 * i]; val py = pts[2 * i + 1]
+            if (px < gx0) gx0 = px; if (px > gx1) gx1 = px
+            if (py < gy0) gy0 = py; if (py > gy1) gy1 = py
+        }
+        gx0 -= 1.7f; gx1 += 1.7f
+        gy0 -= 1.7f * h; gy1 += 1.7f * h
+
+        val sx0 = pts[0]; val sy0 = pts[1]
+        val ex0 = pts[2 * n - 2]; val ey0 = pts[2 * n - 1]
+        val starts = IntArray(26); val startD2 = FloatArray(26); var sCnt = 0
+        val ends = IntArray(26); val endD2 = FloatArray(26); var eCnt = 0
+        for (k in 0 until 26) {
+            if (!g.present[k]) continue
+            val dsx = g.normCx[k] - sx0
+            val dsy = (g.normCy[k] - sy0) / h
+            val d2s = dsx * dsx + dsy * dsy
+            if (d2s <= NEAR * NEAR) { starts[sCnt] = k; startD2[sCnt] = d2s; sCnt++ }
+            val dex = g.normCx[k] - ex0
+            val dey = (g.normCy[k] - ey0) / h
+            val d2e = dex * dex + dey * dey
+            if (d2e <= NEAR * NEAR) { ends[eCnt] = k; endD2[eCnt] = d2e; eCnt++ }
         }
 
-        val starts = near(pts[0], pts[1])
-        val ends = near(pts[2 * n - 2], pts[2 * n - 1])
-        val heap = PriorityQueue<Result>(limit + 1, compareBy { it.score })
-        val ideal = FloatArray(64)
-        for (s in starts) for (e in ends) {
-            val ids = dict.index[s * 26 + e] ?: continue
-            for (id in ids) {
-                val code = dict.codes[id]
-                val us = g.cache[code] ?: run {
-                    val keys = keysOf(code, g) ?: return@run null
-                    if (keys.size < 2 || keys.size > 32) return@run null
-                    for (j in keys.indices) { ideal[2 * j] = cx[keys[j]]; ideal[2 * j + 1] = cy[keys[j]] }
-                    resample(ideal, keys.size)
-                }?.also { g.cache[code] = it } ?: continue
-                // cheap length pruning using the resampled ideal path
-                val iLen = pathLength(us, N)
-                if (iLen > 1.8f * gLen + 1.5f || iLen < 0.55f * gLen - 1.5f) continue
-                var loc = 0f
-                for (i in 0 until N) loc += hypot(gs[2 * i] - us[2 * i], gs[2 * i + 1] - us[2 * i + 1])
-                loc /= N
-                if (loc > 3f * S_LOC) continue
-                val un = normalize(us, 1f)
-                var shp = 0f
-                for (i in 0 until N) shp += hypot(gn[2 * i] - un[2 * i], gn[2 * i + 1] - un[2 * i + 1])
-                shp /= N
-                // every key of the word should be passed reasonably closely
-                var miss = 0f
-                val keys = keysOf(code, g)!!
-                for (j in 1 until keys.size - 1) {
-                    val kx = cx[keys[j]]
-                    val ky = cy[keys[j]]
-                    var m = Float.MAX_VALUE
-                    for (i in 0 until N) {
-                        val dx = gs[2 * i] - kx
-                        val dy = (gs[2 * i + 1] - ky) / h
-                        m = min(m, dx * dx + dy * dy)
+        val dpCur = FloatArray(M)
+        val dpNext = FloatArray(M)
+        val coarseLimit = 120
+        val coarseHeap = PriorityQueue<Coarse>(coarseLimit + 1, compareBy { it.coarseScore })
+
+        // Pass 1: fast bounding box + length + coarse trace coverage + monotonic alignment
+        for (si in 0 until sCnt) {
+            val sK = starts[si]
+            val d2s = startD2[si]
+            for (ei in 0 until eCnt) {
+                val eK = ends[ei]
+                val ids = dict.index[sK * 26 + eK] ?: continue
+                val endPen = d2s + endD2[ei]
+                for (id in ids) {
+                    val code = dict.codes[id]
+                    val ideal = g.cache[code] ?: buildIdealPath(code, g)?.also { g.cache[code] = it } ?: continue
+                    val iLen = ideal.iLen
+                    if (iLen > 1.90f * gLen + 1.4f || iLen < 0.42f * gLen - 1.2f) continue
+                    if (ideal.minX < gx0 || ideal.maxX > gx1 || ideal.minY < gy0 || ideal.maxY > gy1) continue
+                    val L = ideal.keys.size
+                    val traceCoarse = traceToIdealErr(gs, ideal.kpts, L, step = 2)
+                    if (traceCoarse > 1.35f) continue
+                    val mono = monotonicMiss(ideal.kpts, L, gs, h, 0.30f, dpCur, dpNext)
+                    val avgMono = mono / max(L - 1, 1)
+                    val lenRatio = abs(iLen - gLen) / max(gLen, 1.5f)
+                    val score1 = -2.2f * avgMono - 2.4f * traceCoarse * traceCoarse - 1.8f * endPen - 1.8f * lenRatio * lenRatio + 0.30f * dict.freq[id]
+                    if (coarseHeap.size < coarseLimit) {
+                        coarseHeap.add(Coarse(id, ideal, endPen, score1))
+                    } else if (score1 > coarseHeap.peek()!!.coarseScore) {
+                        coarseHeap.poll()
+                        coarseHeap.add(Coarse(id, ideal, endPen, score1))
                     }
-                    miss += max(0f, sqrt(m) - 0.7f)
-                }
-                // the gesture starts and ends on the word's first and last key (e.g. hello vs help)
-                val k0 = keys[0]
-                val k1 = keys[keys.size - 1]
-                val sx = pts[0] - cx[k0]
-                val sy = (pts[1] - cy[k0]) / h
-                val ex = pts[2 * n - 2] - cx[k1]
-                val ey = (pts[2 * n - 1] - cy[k1]) / h
-                val ends = sx * sx + sy * sy + ex * ex + ey * ey
-                val a = loc / S_LOC
-                val b = shp / S_SHP
-                val score = -a * a / 2f - b * b / 2f - 4f * miss - END_W * ends + ALPHA * dict.freq[id]
-                if (heap.size < limit) heap.add(Result(code, dict.outputs[id], score))
-                else if (score > heap.peek()!!.score) {
-                    heap.poll(); heap.add(Result(code, dict.outputs[id], score))
                 }
             }
         }
-        return heap.sortedByDescending { it.score }
+
+        // Pass 2: high-precision Banded DTW + Full trace coverage + Monotonic key alignment
+        val fineHeap = PriorityQueue<Result>(limit + 1, compareBy { it.score })
+        val freqW = if (mode == Mode.Flypy) 0.34f else 0.32f
+        for (c in coarseHeap) {
+            val ideal = c.ideal
+            val L = ideal.keys.size
+            val dtwLoc = bandedDtw(gs, ideal.us, dpCur, dpNext)
+            val dtwShp = bandedDtw(gn, ideal.un, dpCur, dpNext)
+            val traceErr = traceToIdealErr(gs, ideal.soft, L, step = 1)
+            val missAvg = monotonicMiss(ideal.kpts, L, gs, h, 0.45f, dpCur, dpNext) / max(L - 1, 1)
+
+            var chordDev = 0f
+            if (L == 2 && gLen > 1.8f) {
+                val ax = ideal.kpts[0]; val ay = ideal.kpts[1]
+                val bx = ideal.kpts[2]; val by = ideal.kpts[3]
+                var maxD2 = 0f
+                var gi = 0
+                while (gi < M) {
+                    val d2 = pointToSegDist2(gs[2 * gi], gs[2 * gi + 1], ax, ay, bx, by)
+                    if (d2 > maxD2) maxD2 = d2
+                    gi += 2
+                }
+                val maxD = sqrt(maxD2)
+                if (maxD > 0.65f) chordDev = 4.0f * (maxD - 0.65f) * (maxD - 0.65f)
+            }
+            val iLen = max(ideal.iLen, 0.5f)
+            val lenMis = max(gLen / iLen, iLen / max(gLen, 0.5f)) - 1.0f
+            val a = dtwLoc / 0.50f
+            val b = dtwShp / 0.17f
+            val rawCode = dict.codes[c.id]
+            // 抑制“多键叠在两键上”造成的伪2键词（如 ddde 带的 / uuuh 书上 / niii 你吃 抢占 de 的 / uh 上 / ni 你）
+            val repeatPen = if (mode != Mode.English) {
+                val repeats = rawCode.length - L
+                when {
+                    L == 2 && rawCode.length >= 4 -> 4.5f
+                    repeats > 0 -> 0.85f * repeats
+                    else -> 0f
+                }
+            } else 0f
+            val score = -a * a - b * b - 2.8f * traceErr * traceErr - 3.2f * missAvg -
+                1.65f * c.endPen - 2.4f * lenMis * lenMis - chordDev - repeatPen + freqW * dict.freq[c.id]
+
+            if (fineHeap.size < limit) fineHeap.add(Result(rawCode, dict.outputs[c.id], score))
+            else if (score > fineHeap.peek()!!.score) {
+                fineHeap.poll(); fineHeap.add(Result(dict.codes[c.id], dict.outputs[c.id], score))
+            }
+        }
+        return fineHeap.sortedByDescending { it.score }
     }
 }

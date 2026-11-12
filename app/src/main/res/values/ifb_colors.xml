@@ -1,5 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ifb_canvas">#F5F4ED</color>
+    <color name="ifb_surface">#FAF9F5</color>
+    <color name="ifb_text">#141413</color>
+    <color name="ifb_text_secondary">#5E5D59</color>
+    <color name="ifb_muted">#87867F</color>
+    <color name="ifb_border">#F0EEE6</color>
+    <color name="ifb_border_strong">#E3DACC</color>
     <color name="ifb_brand">#D97757</color>
+    <color name="ifb_brand_ink">#C6613F</color>
+    <color name="ifb_error">#B53333</color>
+    <color name="ifb_sage">#7D8B6A</color>
+    <color name="ifb_amber">#D97706</color>
 </resources>

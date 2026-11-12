@@ -26,7 +26,7 @@ class SymbolKey(
 ) : KeyDef(
     Appearance.Text(
         displayText = symbol,
-        textSize = 23f,
+        textSize = 26f,
         percentWidth = percentWidth,
         variant = variant
     ),
@@ -48,7 +48,7 @@ class AlphabetKey(
     Appearance.AltText(
         displayText = character,
         altText = punctuation,
-        textSize = 27f,
+        textSize = 25f,
         variant = variant
     ),
     setOf(
@@ -115,7 +115,7 @@ class LayoutSwitchKey(
 ) : KeyDef(
     Appearance.Text(
         displayText,
-        textSize = 18.5f,
+        textSize = 19.5f,
         textStyle = Typeface.NORMAL,
         percentWidth = percentWidth,
         variant = variant
@@ -160,7 +160,7 @@ class CommaKey(
 ) : KeyDef(
     Appearance.ImageText(
         displayText = ",",
-        textSize = 23f,
+        textSize = 26f,
         percentWidth = percentWidth,
         variant = variant,
         src = R.drawable.ic_baseline_tag_faces_24

@@ -73,7 +73,7 @@ class TitleUi(override val ctx: Context, theme: Theme) : Ui {
         titleText.isVisible = showTitle
         extension = view
         root.run {
-            add(view, lParams(matchConstraints, dp(40)) {
+            add(view, lParams(if (showTitle) wrapContent else matchConstraints, dp(40)) {
                 centerVertically()
                 if (showTitle) {
                     endOfParent(dp(5))

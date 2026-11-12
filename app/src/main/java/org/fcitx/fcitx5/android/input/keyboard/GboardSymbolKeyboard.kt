@@ -13,7 +13,7 @@ class GbSymKey(
     symbol: String,
     percentWidth: Float = 0.1f,
     variant: Variant = Variant.Normal,
-    textSize: Float = 23f
+    textSize: Float = 26.8f
 ) : KeyDef(
     Appearance.Text(
         displayText = symbol,
@@ -39,10 +39,10 @@ class GboardSymbolKeyboard(
 
         private fun bottomRow(left: String, right: String) = listOf(
             LayoutSwitchKey("返回", TextKeyboard.Name, 0.15f, Variant.Alternative),
-            GbSymKey(left, 0.1f, Variant.Alternative),
+            GbSymKey(left, 0.1f, Variant.Alternative, 26f),
             LayoutSwitchKey("12\n34", NumberKeyboard.Name, 0.1f, Variant.Normal),
             SpaceKey(),
-            GbSymKey(right, 0.1f, Variant.Alternative),
+            GbSymKey(right, 0.1f, Variant.Alternative, 26f),
             ReturnKey()
         )
 
@@ -84,12 +84,13 @@ class GboardSymbolKeyboard(
     private class DigitGridView(context: android.content.Context, color: Int) : android.view.View(context) {
         private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             this.color = color
-            textSize = 12.5f * context.resources.displayMetrics.scaledDensity
+            textSize = 13.5f * context.resources.displayMetrics.scaledDensity
             textAlign = android.graphics.Paint.Align.CENTER
             GboardFont.get(context)?.let { typeface = it }
+            applyKeycapStroke(context.resources.displayMetrics.density, 0.35f)
         }
         private val cellW = paint.textSize * 0.68f
-        private val cellH = paint.textSize * 1.08f
+        private val cellH = paint.textSize * 1.02f
 
         override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) =
             setMeasuredDimension((cellW * 2).toInt() + 2, (cellH * 2).toInt() + 2)

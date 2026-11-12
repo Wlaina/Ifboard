@@ -8,12 +8,15 @@ import android.content.Context
 import android.graphics.Typeface
 import androidx.annotation.DrawableRes
 import androidx.core.view.isVisible
+import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.data.theme.Theme
 import org.fcitx.fcitx5.android.data.theme.ThemeManager
+import org.fcitx.fcitx5.android.input.bar.ui.ToolButton
 import org.fcitx.fcitx5.android.input.keyboard.CustomGestureView
 import org.fcitx.fcitx5.android.utils.alpha
 import org.fcitx.fcitx5.android.utils.pressHighlightDrawable
 import org.fcitx.fcitx5.android.utils.rippleDrawable
+import splitties.dimensions.dp
 import splitties.resources.drawable
 import splitties.views.dsl.constraintlayout.after
 import splitties.views.dsl.constraintlayout.before
@@ -21,11 +24,13 @@ import splitties.views.dsl.constraintlayout.centerVertically
 import splitties.views.dsl.constraintlayout.constraintLayout
 import splitties.views.dsl.constraintlayout.endOfParent
 import splitties.views.dsl.constraintlayout.lParams
+import splitties.views.dsl.constraintlayout.matchConstraints
 import splitties.views.dsl.constraintlayout.startOfParent
 import splitties.views.dsl.core.Ui
 import splitties.views.dsl.core.add
 import splitties.views.dsl.core.imageView
 import splitties.views.dsl.core.lParams
+import splitties.views.dsl.core.matchParent
 import splitties.views.dsl.core.textView
 import splitties.views.dsl.core.view
 import splitties.views.gravityCenter
@@ -92,12 +97,26 @@ class PickerTabsUi(override val ctx: Context, val theme: Theme) : Ui {
     private var selected = -1
 
     private var onTabClick: (TabUi.(Int) -> Unit)? = null
+    private var onBackClick: (() -> Unit)? = null
+
+    private val backButton by lazy {
+        ToolButton(ctx, R.drawable.ic_baseline_arrow_back_24, theme).apply {
+            contentDescription = ctx.getString(R.string.back_to_keyboard)
+            setOnClickListener { onBackClick?.invoke() }
+        }
+    }
 
     override val root = constraintLayout { }
 
-    fun setTabs(categories: List<PickerData.Category>) {
-        tabs.forEach { root.removeView(it.root) }
+    fun setTabs(categories: List<PickerData.Category>, showBackButton: Boolean = false) = with(root) {
+        removeAllViews()
         selected = -1
+        if (showBackButton) {
+            add(backButton, lParams(ctx.dp(40), matchParent) {
+                centerVertically()
+                startOfParent(ctx.dp(2))
+            })
+        }
         tabs = Array(categories.size) {
             val category = categories[it]
             TabUi().apply {
@@ -108,12 +127,20 @@ class PickerTabsUi(override val ctx: Context, val theme: Theme) : Ui {
             }
         }
         tabs.forEachIndexed { i, tabUi ->
-            root.add(tabUi.root, root.lParams {
+            add(tabUi.root, lParams(matchConstraints, matchParent) {
                 centerVertically()
-                if (i == 0) startOfParent() else after(tabs[i - 1].root)
-                if (i == tabs.size - 1) endOfParent() else before(tabs[i + 1].root)
+                if (i == 0) {
+                    if (showBackButton) after(backButton, ctx.dp(2)) else startOfParent()
+                } else {
+                    after(tabs[i - 1].root)
+                }
+                if (i == tabs.size - 1) endOfParent(ctx.dp(2)) else before(tabs[i + 1].root)
             })
         }
+    }
+
+    fun setOnBackClickListener(listener: (() -> Unit)?) {
+        onBackClick = listener
     }
 
     fun activateTab(index: Int) {

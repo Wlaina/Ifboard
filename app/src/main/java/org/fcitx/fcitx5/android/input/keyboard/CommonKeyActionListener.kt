@@ -5,10 +5,12 @@
 
 package org.fcitx.fcitx5.android.input.keyboard
 
+import android.view.KeyEvent
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import org.fcitx.fcitx5.android.core.FcitxAPI
+import org.fcitx.fcitx5.android.core.FcitxKeyMapping
 import org.fcitx.fcitx5.android.daemon.launchOnReady
 import org.fcitx.fcitx5.android.data.prefs.AppPrefs
 import org.fcitx.fcitx5.android.input.broadcast.PreeditEmptyStateComponent
@@ -93,8 +95,17 @@ class CommonKeyActionListener :
                 is FcitxKeyAction -> service.postFcitxJob {
                     sendKey(action.act, action.states.states, action.code)
                 }
-                is SymAction -> service.postFcitxJob {
-                    sendKey(action.sym, action.states)
+                is SymAction -> when {
+                    action.sym.sym == FcitxKeyMapping.FcitxKey_space &&
+                        horizontalCandidate.commitPrimaryCorrection() -> Unit
+                    else -> {
+                        if (action.sym.sym == FcitxKeyMapping.FcitxKey_BackSpace) {
+                            FlypyTypoCorrector.popLast()
+                        }
+                        service.postFcitxJob {
+                            sendKey(action.sym, action.states)
+                        }
+                    }
                 }
                 is CommitAction -> service.postFcitxJob {
                     commitAndReset()
@@ -156,6 +167,7 @@ class CommonKeyActionListener :
                         Stopped -> {}
                         Selection -> service.deleteSelection()
                         Reset -> if (action.totalCnt < 0) { // swipe left
+                            FlypyTypoCorrector.clear()
                             service.postFcitxJob { reset() }
                         }
                     }
@@ -186,6 +198,8 @@ class CommonKeyActionListener :
                         SpaceLongPressBehavior.ShowPicker -> showInputMethodPicker()
                     }
                 }
+                is KeyAction.UndoAction -> service.sendCombinationKeyEvents(KeyEvent.KEYCODE_Z, ctrl = true)
+                is KeyAction.RedoAction -> service.sendCombinationKeyEvents(KeyEvent.KEYCODE_Z, ctrl = true, shift = true)
                 else -> {}
             }
         }

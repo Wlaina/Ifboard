@@ -2,32 +2,36 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
 
     <style name="Theme.FcitxAppTheme" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Ifboard "warm paper": warm neutrals, one terracotta accent -->
-        <item name="colorPrimary">#FFD97757</item>
+        <!-- Ifboard "暖纸 · 液态玻璃": 浅色模式令牌 -->
+        <item name="colorPrimary">@color/ifb_brand</item>
         <item name="colorOnPrimary">#FFFFFFFF</item>
         <item name="colorPrimaryContainer">#FFF6DFD5</item>
         <item name="colorOnPrimaryContainer">#FF5A2A17</item>
-        <item name="colorSecondary">#FFC6613F</item>
+        <item name="colorSecondary">@color/ifb_brand_ink</item>
         <item name="colorSecondaryContainer">#FFF6DFD5</item>
         <item name="colorOnSecondaryContainer">#FF5A2A17</item>
-        <item name="colorTertiary">#FF7D8B6A</item>
-        <item name="colorError">#FFB53333</item>
-        <item name="colorSurface">#FFF5F4ED</item>
-        <item name="colorOnSurface">#FF141413</item>
-        <item name="colorOnSurfaceVariant">#FF5E5D59</item>
-        <item name="colorSurfaceContainerLowest">#FFFAF9F5</item>
-        <item name="colorSurfaceContainerLow">#FFFAF9F5</item>
-        <item name="colorSurfaceContainer">#FFF5F4ED</item>
+        <item name="colorTertiary">@color/ifb_sage</item>
+        <item name="colorError">@color/ifb_error</item>
+        <item name="colorSurface">@color/ifb_canvas</item>
+        <item name="colorOnSurface">@color/ifb_text</item>
+        <item name="colorOnSurfaceVariant">@color/ifb_text_secondary</item>
+        <item name="colorSurfaceContainerLowest">@color/ifb_surface</item>
+        <item name="colorSurfaceContainerLow">@color/ifb_surface</item>
+        <item name="colorSurfaceContainer">@color/ifb_canvas</item>
         <item name="colorSurfaceContainerHigh">#FFEFEDE4</item>
         <item name="colorSurfaceContainerHighest">#FFEFEDE4</item>
-        <item name="colorOutline">#FFE3DACC</item>
-        <item name="colorOutlineVariant">#FFF0EEE6</item>
-        <item name="android:colorBackground">#FFF5F4ED</item>
+        <item name="colorOutline">@color/ifb_border_strong</item>
+        <item name="colorOutlineVariant">@color/ifb_border</item>
+        <item name="android:colorBackground">@color/ifb_canvas</item>
         <item name="android:windowBackground">@color/ifb_canvas</item>
-        <item name="android:textColorPrimary">#FF141413</item>
-        <item name="android:textColorSecondary">#FF5E5D59</item>
+        <item name="android:textColorPrimary">@color/ifb_text</item>
+        <item name="android:textColorSecondary">@color/ifb_text_secondary</item>
+        <item name="android:textColorHint">@color/ifb_muted</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="alertDialogTheme">@style/Theme.Ifboard.AlertDialog</item>
+        <item name="android:alertDialogTheme">@style/Theme.Ifboard.AlertDialog</item>
+        <item name="materialAlertDialogTheme">@style/ThemeOverlay.Ifboard.AlertDialog</item>
         <item name="colorLogFatal">@color/red_A700</item>
         <item name="colorLogError">@color/red_400</item>
         <item name="colorLogWarning">@color/yellow_800</item>
@@ -36,22 +40,55 @@
         <item name="colorLogVerbose">@color/grey_700</item>
     </style>
 
+    <style name="Theme.Ifboard.AlertDialog" parent="Theme.Material3.DayNight.Dialog.Alert">
+        <item name="dialogCornerRadius">24dp</item>
+        <item name="colorSurface">@color/ifb_surface</item>
+        <item name="colorPrimary">@color/ifb_brand</item>
+        <item name="colorOnSurface">@color/ifb_text</item>
+        <item name="colorOnSurfaceVariant">@color/ifb_text_secondary</item>
+        <item name="android:textColorPrimary">@color/ifb_text</item>
+        <item name="android:textColorSecondary">@color/ifb_text_secondary</item>
+        <item name="materialAlertDialogTitleTextStyle">@style/TextAppearance.Ifboard.DialogTitle</item>
+    </style>
+
+    <style name="ThemeOverlay.Ifboard.AlertDialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
+        <item name="dialogCornerRadius">24dp</item>
+        <item name="colorSurface">@color/ifb_surface</item>
+        <item name="colorSurfaceContainerHigh">@color/ifb_surface</item>
+        <item name="colorPrimary">@color/ifb_brand</item>
+        <item name="colorOnSurface">@color/ifb_text</item>
+        <item name="colorOnSurfaceVariant">@color/ifb_text_secondary</item>
+        <item name="materialAlertDialogTitleTextStyle">@style/TextAppearance.Ifboard.DialogTitle</item>
+    </style>
+
     <style name="Theme.InputViewTheme" parent="@android:style/Theme.DeviceDefault.Settings" />
 
     <style name="Theme.DialogTheme" parent="@android:style/Theme.DeviceDefault.Light.Dialog" />
 
     <style name="InputViewSnackbarTheme" parent="Theme.MaterialComponents.Light.NoActionBar" />
 
-    <!-- Ifboard pages that need an action bar -->
+    <!-- Ifboard 独立设置页统一使用莫奈背景 + 液态玻璃顶栏 -->
     <style name="Theme.Ifboard.Page" parent="Theme.FcitxAppTheme">
-        <item name="windowActionBar">true</item>
-        <item name="windowNoTitle">false</item>
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
     </style>
 
-    <!-- serif titles, weight from size not boldness -->
+    <!-- 衬线标题：字重 500，靠字号与字距拉出呼吸感，不用重粗体 -->
     <style name="TextAppearance.Ifboard.Title" parent="TextAppearance.Material3.TitleLarge">
         <item name="android:fontFamily">serif</item>
+        <item name="android:fontWeight" tools:targetApi="p">500</item>
+        <item name="android:textStyle">normal</item>
         <item name="android:textSize">22sp</item>
         <item name="android:letterSpacing">0.01</item>
+        <item name="android:textColor">@color/ifb_text</item>
+    </style>
+
+    <style name="TextAppearance.Ifboard.DialogTitle" parent="MaterialAlertDialog.Material3.Title.Text">
+        <item name="android:fontFamily">serif</item>
+        <item name="android:fontWeight" tools:targetApi="p">500</item>
+        <item name="android:textStyle">normal</item>
+        <item name="android:textSize">19sp</item>
+        <item name="android:letterSpacing">0.01</item>
+        <item name="android:textColor">@color/ifb_text</item>
     </style>
 </resources>

@@ -66,13 +66,13 @@ class PickerPageUi(
 
         // emoji: 7/7/6, backspace on bottom right
         // Gboard style emoji grid: 8 x 4, backspace lives in the bottom bar
-        Medium(32, 8, 4, 22f, false, false),
+        Medium(32, 8, 4, 31f, false, false),
 
         // emoticon: 4/4/4, no backspace
         Low(12, 4, 3, 19f, true, false),
 
         // Gboard style vertical lists: one row per item
-        EmojiRow(8, 8, 1, 22f, false, false),
+        EmojiRow(8, 8, 1, 31f, false, false),
         EmoticonRow(4, 4, 1, 19f, true, false)
     }
 
@@ -90,6 +90,10 @@ class PickerPageUi(
 
     private val keyViews = Array(density.pageSize) {
         TextKeyView(ctx, theme, keyAppearance).apply {
+            if (density == Density.Medium || density == Density.EmojiRow) {
+                mainText.paint.style = android.graphics.Paint.Style.FILL
+                mainText.paint.strokeWidth = 0f
+            }
             if (density.autoScale) {
                 mainText.apply {
                     scaleMode = AutoScaleTextView.Mode.Proportional

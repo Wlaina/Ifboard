@@ -22,8 +22,8 @@ import androidx.lifecycle.lifecycleScope
 import androidx.paging.Pager
 import androidx.paging.PagingConfig
 import androidx.recyclerview.widget.ItemTouchHelper
+import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import androidx.recyclerview.widget.StaggeredGridLayoutManager
 import com.google.android.material.snackbar.BaseTransientBottomBar.BaseCallback
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.snackbar.SnackbarContentLayout
@@ -69,8 +69,19 @@ class ClipboardWindow : InputWindow.ExtendedInputWindow<ClipboardWindow>() {
 
     private lateinit var stateMachine: EventStateMachine<ClipboardStateMachine.State, ClipboardStateMachine.TransitionEvent, ClipboardStateMachine.BooleanKey>
 
+    private var ignoreSwitchChange = false
+
+    private fun syncListeningSwitch(checked: Boolean) {
+        if (ui.listeningSwitch.isChecked == checked) return
+        ignoreSwitchChange = true
+        ui.listeningSwitch.isChecked = checked
+        ui.listeningSwitch.jumpDrawablesToCurrentState()
+        ignoreSwitchChange = false
+    }
+
     @Keep
     private val clipboardEnabledListener = ManagedPreference.OnChangeListener<Boolean> { _, it ->
+        syncListeningSwitch(it)
         stateMachine.push(
             ClipboardListeningUpdated, ClipboardListeningEnabled to it
         )
@@ -93,16 +104,18 @@ class ClipboardWindow : InputWindow.ExtendedInputWindow<ClipboardWindow>() {
     }
     private var adapterSubmitJob: Job? = null
 
-    // Gboard style sections: 最近 (screenshots + recent) and 已固定 (pinned)
+    // Separate left/right columns: text (最近 / 已固定) + screenshots (截图)
     private val recentHeader by lazy { SectionHeaderAdapter(theme, "最近") }
     private val pinnedHeader by lazy { SectionHeaderAdapter(theme, "已固定") }
+    private val screenshotHeader by lazy { SectionHeaderAdapter(theme, "截图") }
     private val adapter: ClipboardAdapter by lazy { newEntryAdapter() }
     private val pinnedAdapter: ClipboardAdapter by lazy { newEntryAdapter() }
     private var pinnedSubmitJob: Job? = null
 
     private fun updateSections() {
-        recentHeader.visible = imageAdapter.itemCount > 0 || adapter.itemCount > 0
+        recentHeader.visible = adapter.itemCount > 0
         pinnedHeader.visible = pinnedAdapter.itemCount > 0
+        screenshotHeader.visible = imageAdapter.itemCount > 0
     }
 
     private fun newEntryAdapter(): ClipboardAdapter =
@@ -163,12 +176,17 @@ class ClipboardWindow : InputWindow.ExtendedInputWindow<ClipboardWindow>() {
 
     private val ui by lazy {
         ClipboardUi(context, theme).apply {
-            recyclerView.apply {
-                layoutManager = StaggeredGridLayoutManager(2, StaggeredGridLayoutManager.VERTICAL)
+            textRecyclerView.apply {
+                layoutManager = LinearLayoutManager(context)
                 adapter = ConcatAdapter(
-                    recentHeader, imageAdapter, this@ClipboardWindow.adapter, pinnedHeader, pinnedAdapter
+                    recentHeader, this@ClipboardWindow.adapter, pinnedHeader, pinnedAdapter
                 )
                 // item animations + view transitions crash RecyclerView ("Scrapped or attached views")
+                itemAnimator = null
+            }
+            imageRecyclerView.apply {
+                layoutManager = LinearLayoutManager(context)
+                adapter = ConcatAdapter(screenshotHeader, imageAdapter)
                 itemAnimator = null
             }
             ItemTouchHelper(object : ItemTouchHelper.Callback() {
@@ -196,15 +214,19 @@ class ClipboardWindow : InputWindow.ExtendedInputWindow<ClipboardWindow>() {
                         showUndoSnackbar(entry.id)
                     }
                 }
-            }).attachToRecyclerView(recyclerView)
+            }).attachToRecyclerView(textRecyclerView)
             enableUi.enableButton.setOnClickListener {
                 clipboardEnabledPref.setValue(true)
+                syncListeningSwitch(true)
             }
             listeningSwitch.isChecked = clipboardEnabledPref.getValue()
-            listeningSwitch.setOnCheckedChangeListener { _, checked -> clipboardEnabledPref.setValue(checked) }
+            listeningSwitch.setOnCheckedChangeListener { _, checked ->
+                if (!ignoreSwitchChange) clipboardEnabledPref.setValue(checked)
+            }
             deleteAllButton.setOnClickListener {
                 service.lifecycleScope.launch {
-                    promptDeleteAll(ClipboardManager.haveUnpinned())
+                    val skipPinned = ClipboardManager.haveUnpinned() || imageAdapter.itemCount > 0
+                    promptDeleteAll(skipPinned)
                 }
             }
         }
@@ -228,6 +250,14 @@ class ClipboardWindow : InputWindow.ExtendedInputWindow<ClipboardWindow>() {
             menu.item(android.R.string.ok) {
                 service.lifecycleScope.launch {
                     val ids = ClipboardManager.deleteAll(skipPinned)
+                    if (skipPinned && imageAdapter.itemCount > 0) {
+                        val snapshot = imageAdapter.items
+                        val prevState = ClipboardImages.dismissAll(context, snapshot)
+                        pendingDismissedImages = prevState to snapshot
+                        imageAdapter.submit(emptyList())
+                        ui.hasImages = false
+                        updateSections()
+                    }
                     showUndoSnackbar(*ids)
                 }
             }
@@ -239,19 +269,31 @@ class ClipboardWindow : InputWindow.ExtendedInputWindow<ClipboardWindow>() {
     }
 
     private val pendingDeleteIds = arrayListOf<Int>()
+    private var pendingDismissedImages: Pair<ClipboardImages.DismissState, List<ClipboardImage>>? = null
 
     @SuppressLint("RestrictedApi")
     private fun showUndoSnackbar(vararg id: Int) {
         id.forEach { pendingDeleteIds.add(it) }
-        val str = context.resources.getString(R.string.num_items_deleted, pendingDeleteIds.size)
+        val total = pendingDeleteIds.size + (pendingDismissedImages?.second?.size ?: 0)
+        if (total == 0) return
+        val str = context.resources.getString(R.string.num_items_deleted, total)
         snackbarInstance = Snackbar.make(snackbarCtx, ui.root, str, Snackbar.LENGTH_LONG)
             .setBackgroundTint(theme.popupBackgroundColor)
             .setTextColor(theme.popupTextColor)
             .setActionTextColor(theme.genericActiveBackgroundColor)
             .setAction(R.string.undo) {
                 service.lifecycleScope.launch {
-                    ClipboardManager.undoDelete(*pendingDeleteIds.toIntArray())
-                    pendingDeleteIds.clear()
+                    if (pendingDeleteIds.isNotEmpty()) {
+                        ClipboardManager.undoDelete(*pendingDeleteIds.toIntArray())
+                        pendingDeleteIds.clear()
+                    }
+                    pendingDismissedImages?.let { (prevState, list) ->
+                        ClipboardImages.restoreDismiss(context, prevState)
+                        pendingDismissedImages = null
+                        imageAdapter.submit(list)
+                        ui.hasImages = list.isNotEmpty()
+                        updateSections()
+                    }
                 }
             }
             .addCallback(object : Snackbar.Callback() {
@@ -266,6 +308,7 @@ class ClipboardWindow : InputWindow.ExtendedInputWindow<ClipboardWindow>() {
                             service.lifecycleScope.launch {
                                 ClipboardManager.realDelete()
                                 pendingDeleteIds.clear()
+                                pendingDismissedImages = null
                             }
                         }
                         BaseCallback.DISMISS_EVENT_ACTION,
@@ -301,7 +344,8 @@ class ClipboardWindow : InputWindow.ExtendedInputWindow<ClipboardWindow>() {
         stateMachine = ClipboardStateMachine.new(initialState, isEmpty, isListening) {
             ui.switchUiByState(it)
         }
-        // manually switch to initial ui
+        // manually switch to initial ui & sync switch state
+        syncListeningSwitch(isListening)
         ui.switchUiByState(initialState)
         pinnedAdapter.addLoadStateListener { updateSections() }
         pinnedSubmitJob = service.lifecycleScope.launch {
