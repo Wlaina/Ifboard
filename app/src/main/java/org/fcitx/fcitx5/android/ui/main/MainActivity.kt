@@ -96,6 +96,33 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         promptBackgroundStart()
+        if (bgStartDialog?.isShowing != true) promptGrammarModel()
+    }
+
+    private var gramDialog: androidx.appcompat.app.AlertDialog? = null
+
+    /** Ifboard: the grammar model is not in the APK; offer it once, the settings page has it afterwards */
+    private fun promptGrammarModel() {
+        val gm = org.fcitx.fcitx5.android.ifboard.GrammarModel
+        val sp = androidx.preference.PreferenceManager.getDefaultSharedPreferences(this)
+        if (gramDialog?.isShowing == true || sp.getBoolean(gm.PREF_ASKED, false)) return
+        if (gm.installed(this) || gm.busy) {
+            sp.edit().putBoolean(gm.PREF_ASKED, true).apply(); return
+        }
+        gramDialog = androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("下载语法模型？")
+            .setMessage(
+                "万象语法模型能让整句输入的候选更准确，约 400 MB，建议连接 Wi-Fi 后下载。\n\n" +
+                        "下载后自动配置好，保存在应用内，以后升级 Ifboard 不用重新下载。" +
+                        "不下载也能正常打字，之后可以在「同步与更新」里随时下载。"
+            )
+            .setPositiveButton("下载") { _, _ ->
+                gm.start(this)
+                android.widget.Toast.makeText(this, "已开始下载，进度可在「同步与更新」里查看", android.widget.Toast.LENGTH_LONG).show()
+            }
+            .setNegativeButton("暂不") { _, _ -> }
+            .setOnDismissListener { sp.edit().putBoolean(gm.PREF_ASKED, true).apply() }
+            .show()
     }
 
     private var bgStartDialog: androidx.appcompat.app.AlertDialog? = null
