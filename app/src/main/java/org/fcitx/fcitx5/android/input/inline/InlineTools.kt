@@ -328,6 +328,7 @@ class VoiceBar(
     private val handler = Handler(Looper.getMainLooper())
     private var recognizer: SpeechRecognizer? = null
     private var listening = false
+    private var ready = false
 
     var active = false
         private set
@@ -392,7 +393,10 @@ class VoiceBar(
     }
 
     private val listener = object : RecognitionListener {
-        override fun onReadyForSpeech(params: Bundle?) { status.text = "正在听取…" }
+        override fun onReadyForSpeech(params: Bundle?) {
+            ready = true
+            status.text = "正在听取…"
+        }
         override fun onBeginningOfSpeech() {}
         override fun onRmsChanged(rmsdB: Float) {
             // at most 38dp across, the bar is 40dp high
@@ -444,7 +448,7 @@ class VoiceBar(
         mic.scaleX = 0.5f; mic.scaleY = 0.5f
         mic.animate().scaleX(1f).scaleY(1f).setDuration(260)
             .setInterpolator(android.view.animation.OvershootInterpolator(2.5f)).start()
-        status.text = "正在听取…"
+        status.text = "请稍候…"
         onActiveChanged?.invoke(true)
         listen()
     }
@@ -470,7 +474,15 @@ class VoiceBar(
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, service.packageName)
         }
         listening = true
+        ready = false
         r.startListening(intent)
+        // a recognizer that cannot be reached (e.g. hidden by the system) never calls back
+        handler.postDelayed({
+            if (active && listening && !ready) {
+                recognizer?.destroy(); recognizer = null
+                showUnavailable()
+            }
+        }, 3500)
     }
 
     /** system recognizer, else the on-device one, else Google's service addressed directly */

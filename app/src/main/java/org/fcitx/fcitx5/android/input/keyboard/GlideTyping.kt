@@ -71,6 +71,13 @@ object GlideTyping {
     }
 
     /** load the word list for [mode] in background, no-op if already loaded or loading */
+    /** run [block] on the loader thread once [mode]'s word list is loaded (immediately if it is) */
+    fun whenReady(context: Context, mode: Mode, block: () -> Unit) {
+        prepare(context, mode)
+        // the loader is a single thread: this runs after the pending load has finished
+        executor.execute { if (isReady(mode)) block() }
+    }
+
     fun prepare(context: Context, mode: Mode) {
         if (isReady(mode)) return
         synchronized(loading) { if (!loading.add(mode)) return }

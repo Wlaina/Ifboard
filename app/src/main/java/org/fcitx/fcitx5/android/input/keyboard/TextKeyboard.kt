@@ -145,6 +145,15 @@ class TextKeyboard(
 
     override fun onGlideGesture(xy: FloatArray, n: Int, geometry: GlideTyping.Geometry) {
         val mode = glideMode ?: return
+        if (!GlideTyping.isReady(mode)) {
+            // first gesture right after the keyboard started: decode it as soon as the words are loaded
+            GlideTyping.whenReady(context, mode) { post { if (glideMode == mode) commitGlide(xy, n, geometry, mode) } }
+            return
+        }
+        commitGlide(xy, n, geometry, mode)
+    }
+
+    private fun commitGlide(xy: FloatArray, n: Int, geometry: GlideTyping.Geometry, mode: GlideTyping.Mode) {
         val best = GlideTyping.decode(xy, n, geometry, mode).firstOrNull() ?: return
         when (mode) {
             GlideTyping.Mode.Pinyin, GlideTyping.Mode.Flypy -> best.code.forEach {

@@ -553,7 +553,8 @@ abstract class BaseKeyboard(
                 glidePointerId = ev.getPointerId(0)
                 glideDownTime = ev.eventTime
                 glideState =
-                    if (key != null && GlideTyping.isReady(mode)) GlideState.Tracking else GlideState.Rejected
+                    // the word list may still be loading: the gesture is decoded once it is ready
+                    if (key != null) GlideState.Tracking else GlideState.Rejected
                 glideAdd(ev.x, ev.y, ev.eventTime)
             }
             MotionEvent.ACTION_POINTER_DOWN -> {

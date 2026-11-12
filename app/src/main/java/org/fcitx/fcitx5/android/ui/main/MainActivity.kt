@@ -75,7 +75,23 @@ class MainActivity : AppCompatActivity() {
         }
         processIntent(intent)
         checkNotificationPermission()
+        // Ifboard: a page opened from the keyboard menu goes straight back to the app being typed in
+        onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (routeFromKeyboard &&
+                    navController.previousBackStackEntry?.destination?.hasRoute<SettingsRoute.Index>() == true
+                ) {
+                    finish()
+                } else {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                    isEnabled = true
+                }
+            }
+        })
     }
+
+    private var routeFromKeyboard = false
 
     override fun onResume() {
         super.onResume()
@@ -136,6 +152,7 @@ class MainActivity : AppCompatActivity() {
             }
             Intent.ACTION_RUN -> {
                 val route = intent.parcelable<SettingsRoute>(EXTRA_SETTINGS_ROUTE) ?: return
+                routeFromKeyboard = true
                 navController.popBackStack(SettingsRoute.Index, false)
                 navController.navigateWithAnim(route)
             }

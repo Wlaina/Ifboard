@@ -23,7 +23,8 @@ object AppUtil {
     // Ifboard: pages opened from the keyboard go through BackgroundStart (vivo / Xiaomi may block them)
     fun launchMain(context: Context) {
         BackgroundStart.startFromIme(context, Intent(context, MainActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS)
+            // a fresh settings task each time: Back returns to the app being typed in
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS)
         })
     }
 
@@ -31,7 +32,8 @@ object AppUtil {
         BackgroundStart.startFromIme(context, Intent(context, MainActivity::class.java).apply {
             action = Intent.ACTION_RUN
             putExtra(MainActivity.EXTRA_SETTINGS_ROUTE, route)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS)
+            // a fresh settings task each time: Back returns to the app being typed in
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS)
         })
     }
 
