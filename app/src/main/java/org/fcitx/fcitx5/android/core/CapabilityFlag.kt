@@ -112,8 +112,16 @@ value class CapabilityFlags constructor(val flags: ULong) {
                     }
                     InputType.TYPE_CLASS_TEXT -> {
                         (it and InputType.TYPE_MASK_FLAGS).run {
-                            if (hasFlag(InputType.TYPE_TEXT_FLAG_AUTO_COMPLETE) ||
-                                hasFlag(InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
+                            // Ifboard (Gboard behavior): AUTO_COMPLETE (search boxes) and NO_SUGGESTIONS in ordinary
+                            // text fields used to switch English word completion off, which made it look broken in
+                            // most apps. Only honor NO_SUGGESTIONS for addresses / usernames.
+                            val variation = it and InputType.TYPE_MASK_VARIATION
+                            if (hasFlag(InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS) && variation in setOf(
+                                    InputType.TYPE_TEXT_VARIATION_URI,
+                                    InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
+                                    InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,
+                                    InputType.TYPE_TEXT_VARIATION_FILTER
+                                )
                             ) {
                                 flags += CapabilityFlag.NoSpellCheck
                             }

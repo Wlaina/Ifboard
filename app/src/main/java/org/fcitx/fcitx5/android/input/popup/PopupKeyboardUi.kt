@@ -176,8 +176,10 @@ class PopupKeyboardUi(
     }
 
     init {
-        markFocus(focusedIndex)
+        markFocus(focusedIndex, animate = false)
     }
+
+    private val focusInterpolator = android.view.animation.OvershootInterpolator(3f)
 
     override val root = verticalLayout root@{
         background = inactiveBackground
@@ -204,10 +206,24 @@ class PopupKeyboardUi(
         }
     }
 
-    private fun markFocus(index: Int) {
+    private fun markFocus(index: Int, animate: Boolean = true) {
         keyUis.getOrNull(index)?.apply {
             root.background = focusBackground
             textView.setTextColor(theme.genericActiveForegroundColor)
+            // Gboard style: the focused character pops up a little, the highlight springs in
+            textView.animate().cancel()
+            root.animate().cancel()
+            if (animate) {
+                root.scaleX = 0.7f
+                root.scaleY = 0.7f
+                root.animate().scaleX(1f).scaleY(1f).setDuration(200).setInterpolator(focusInterpolator).start()
+                textView.animate().scaleX(FocusScale).scaleY(FocusScale).translationY(-ctx.dp(2f))
+                    .setDuration(200).setInterpolator(focusInterpolator).start()
+            } else {
+                textView.scaleX = FocusScale
+                textView.scaleY = FocusScale
+                textView.translationY = -ctx.dp(2f)
+            }
         }
     }
 
@@ -215,6 +231,11 @@ class PopupKeyboardUi(
         keyUis.getOrNull(index)?.apply {
             root.background = null
             textView.setTextColor(theme.popupTextColor)
+            textView.animate().cancel()
+            root.animate().cancel()
+            root.scaleX = 1f
+            root.scaleY = 1f
+            textView.animate().scaleX(1f).scaleY(1f).translationY(0f).setDuration(140).start()
         }
     }
 
@@ -231,12 +252,17 @@ class PopupKeyboardUi(
         newRow = limitIndex(newRow, rowCount)
         newColumn = limitIndex(newColumn, columnCount)
         val newFocus = keyOrders[newRow][newColumn]
-        if (newFocus < keyUis.size) {
+        if (newFocus < keyUis.size && newFocus != focusedIndex) {
+            org.fcitx.fcitx5.android.data.InputFeedbacks.hapticFeedback(root)
             markInactive(focusedIndex)
             markFocus(newFocus)
             focusedIndex = newFocus
         }
         return false
+    }
+
+    companion object {
+        private const val FocusScale = 1.25f
     }
 
     override fun onTrigger(): KeyAction? {

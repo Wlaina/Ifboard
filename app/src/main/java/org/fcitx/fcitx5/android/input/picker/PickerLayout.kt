@@ -7,6 +7,8 @@ package org.fcitx.fcitx5.android.input.picker
 import android.annotation.SuppressLint
 import android.content.Context
 import androidx.constraintlayout.widget.ConstraintLayout
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.data.theme.Theme
@@ -24,8 +26,20 @@ import splitties.views.dsl.core.view
 import splitties.views.imageResource
 
 @SuppressLint("ViewConstructor")
-class PickerLayout(context: Context, theme: Theme, switchKey: KeyDef, current: PickerWindow.Key? = null) :
-    ConstraintLayout(context) {
+class PickerLayout(
+    context: Context,
+    theme: Theme,
+    switchKey: KeyDef,
+    current: PickerWindow.Key? = null,
+    /** Gboard style: scroll the grid vertically instead of paging horizontally */
+    val vertical: Boolean = false
+) : ConstraintLayout(context) {
+
+    /** vertical layout manager that can be frozen while a popup keyboard is shown */
+    class ListLayoutManager(context: Context) : LinearLayoutManager(context) {
+        var scrollEnabled = true
+        override fun canScrollVertically() = scrollEnabled && super.canScrollVertically()
+    }
 
     class Keyboard(context: Context, theme: Theme, switchKey: KeyDef, current: PickerWindow.Key?) : BaseKeyboard(
         context, theme, listOf(
@@ -74,23 +88,33 @@ class PickerLayout(context: Context, theme: Theme, switchKey: KeyDef, current: P
 
     val pager = view(::ViewPager2) { }
 
+    val listLayoutManager = ListLayoutManager(context)
+
+    val list = RecyclerView(context).apply {
+        layoutManager = listLayoutManager
+        overScrollMode = OVER_SCROLL_NEVER
+        isVerticalScrollBarEnabled = false
+        itemAnimator = null
+    }
+
     val tabsUi = PickerTabsUi(context, theme)
 
     val paginationUi = PickerPaginationUi(context, theme)
 
     init {
-        add(pager, lParams {
+        val content = if (vertical) list else pager
+        add(content, lParams {
             topOfParent()
             centerHorizontally()
             above(embeddedKeyboard)
         })
         add(embeddedKeyboard, lParams {
-            below(pager)
+            below(content)
             centerHorizontally()
             bottomOfParent()
             matchConstraintPercentHeight = 0.25f
         })
-        add(paginationUi.root, lParams(matchConstraints, dp(2)) {
+        if (!vertical) add(paginationUi.root, lParams(matchConstraints, dp(2)) {
             centerHorizontally()
             below(pager, dp(-1))
         })

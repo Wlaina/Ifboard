@@ -67,6 +67,8 @@ class PopupMenuUi(
         }
     }
 
+    private var focusAnimate = false
+
     init {
         markFocus(focusedIndex)
     }
@@ -92,13 +94,26 @@ class PopupMenuUi(
         keyViews.getOrNull(index)?.apply {
             background = activeBackground
             drawable?.setTint(focusTint)
+            if (focusAnimate) {
+                animate().cancel()
+                scaleX = 0.75f
+                scaleY = 0.75f
+                animate().scaleX(1.12f).scaleY(1.12f).setDuration(200)
+                    .setInterpolator(android.view.animation.OvershootInterpolator(3f)).start()
+            } else {
+                scaleX = 1.12f
+                scaleY = 1.12f
+            }
         }
+        focusAnimate = true
     }
 
     private fun markInactive(index: Int) {
         keyViews.getOrNull(index)?.apply {
             background = inactiveBackground
             drawable?.setTint(idleTint)
+            animate().cancel()
+            animate().scaleX(1f).scaleY(1f).setDuration(140).start()
         }
     }
 
@@ -110,7 +125,8 @@ class PopupMenuUi(
         }
         newColumn = limitIndex(newColumn, columnCount)
         val newFocus = columnOrder[newColumn]
-        if (newFocus < keyViews.size) {
+        if (newFocus < keyViews.size && newFocus != focusedIndex) {
+            org.fcitx.fcitx5.android.data.InputFeedbacks.hapticFeedback(root)
             markInactive(focusedIndex)
             markFocus(newFocus)
             focusedIndex = newFocus

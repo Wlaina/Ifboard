@@ -5,9 +5,13 @@
 package org.fcitx.fcitx5.android.input.keyboard
 
 import android.content.Context
+import android.graphics.Canvas
+import android.graphics.Paint
 import android.graphics.Rect
+import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import androidx.annotation.CallSuper
 import androidx.annotation.DrawableRes
 import androidx.constraintlayout.widget.ConstraintLayout
@@ -41,6 +45,7 @@ import splitties.views.dsl.constraintlayout.topOfParent
 import splitties.views.dsl.core.add
 import timber.log.Timber
 import kotlin.math.absoluteValue
+import kotlin.math.hypot
 import kotlin.math.roundToInt
 
 abstract class BaseKeyboard(
@@ -88,6 +93,9 @@ abstract class BaseKeyboard(
     // Gboard style slide input (?123 -> symbol): find keys by screen position
     private val pressActions = LinkedHashMap<KeyView, KeyAction>()
     private val tmpLoc = IntArray(2)
+
+    // glide typing: letter keys, filled while the key views are created in init (must be declared before it)
+    private val letterKeys = LinkedHashMap<KeyView, Char>()
 
     fun findKeyAt(rawX: Float, rawY: Float): Pair<KeyView, KeyAction>? {
         for ((v, a) in pressActions) {
@@ -177,6 +185,9 @@ abstract class BaseKeyboard(
             is KeyDef.Appearance.Text -> TextKeyView(context, theme, def.appearance)
             is KeyDef.Appearance.Image -> ImageKeyView(context, theme, def.appearance)
         }.apply {
+            if (def is AlphabetKey && def.character.length == 1 && def.character[0].lowercaseChar() in 'a'..'z') {
+                letterKeys[this] = def.character[0].lowercaseChar()
+            }
             soundEffect = when (def) {
                 is SpaceKey -> InputFeedbacks.SoundEffect.SpaceBar
                 is MiniSpaceKey -> InputFeedbacks.SoundEffect.SpaceBar
@@ -378,6 +389,234 @@ abstract class BaseKeyboard(
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         val (x, y) = intArrayOf(0, 0).also { getLocationInWindow(it) }
         bounds.set(x, y, x + width, y + height)
+        glideGeometry = null
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        if (changed) glideGeometry = null
+    }
+
+    // ---------------------------------------------------------------- glide typing
+
+    /** which word list glide typing decodes with; null disables glide typing on this keyboard */
+    protected open val glideMode: GlideTyping.Mode? get() = null
+
+    /** called with the finished gesture (points in this view's coordinates) */
+    protected open fun onGlideGesture(xy: FloatArray, n: Int, geometry: GlideTyping.Geometry) {}
+
+    private enum class GlideState { Idle, Tracking, Gliding, Rejected }
+
+    private val glideTyping = prefs.keyboard.glideTyping
+    private val glideTrail by prefs.keyboard.glideTypingTrail
+    private var glideState = GlideState.Idle
+    private var glidePointerId = -1
+    private var glideDownTime = 0L
+    private var glideStartKey: KeyView? = null
+    private var glideLeftStart = false
+    private var glideXY = FloatArray(1024)
+    private var glideT = LongArray(512)
+    private var glideN = 0
+    private var glidePathLen = 0f
+    private var glideGeometry: GlideTyping.Geometry? = null
+    private val glideRect = Rect()
+    private val glideSlop = ViewConfiguration.get(context).scaledTouchSlop
+    private var trailVisible = false
+    private val trailWidth = dp(7f)
+    private val trailPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        color = theme.accentKeyBackgroundColor
+    }
+    private val trailAlpha = if (theme.isDark) 150 else 120
+
+    private fun keyRectOf(v: View, out: Rect) {
+        out.set(0, 0, v.width, v.height)
+        offsetDescendantRectToMyCoords(v, out)
+    }
+
+    private fun letterKeyAt(x: Float, y: Float): KeyView? {
+        for (v in letterKeys.keys) {
+            if (!v.isShown) continue
+            keyRectOf(v, glideRect)
+            if (glideRect.contains(x.toInt(), y.toInt())) return v
+        }
+        return null
+    }
+
+    private fun glideGeometry(): GlideTyping.Geometry? {
+        glideGeometry?.let { return it }
+        if (letterKeys.isEmpty()) return null
+        val cx = FloatArray(26)
+        val cy = FloatArray(26)
+        val present = BooleanArray(26)
+        val ws = ArrayList<Int>()
+        val hs = ArrayList<Int>()
+        letterKeys.forEach { (v, c) ->
+            if (v.width == 0) return@forEach
+            keyRectOf(v, glideRect)
+            val i = c - 'a'
+            cx[i] = glideRect.exactCenterX()
+            cy[i] = glideRect.exactCenterY()
+            present[i] = true
+            ws.add(glideRect.width())
+            hs.add(glideRect.height())
+        }
+        if (ws.isEmpty()) return null
+        ws.sort(); hs.sort()
+        return GlideTyping.Geometry(cx, cy, present, ws[ws.size / 2].toFloat(), hs[hs.size / 2].toFloat())
+            .also { glideGeometry = it }
+    }
+
+    private fun glideAdd(x: Float, y: Float, t: Long) {
+        if (glideN > 0) {
+            val px = glideXY[2 * glideN - 2]
+            val py = glideXY[2 * glideN - 1]
+            val d = hypot(x - px, y - py)
+            if (d < 1f) return
+            glidePathLen += d
+        }
+        if (2 * glideN + 2 > glideXY.size) glideXY = glideXY.copyOf(glideXY.size * 2)
+        if (glideN + 1 > glideT.size) glideT = glideT.copyOf(glideT.size * 2)
+        glideXY[2 * glideN] = x
+        glideXY[2 * glideN + 1] = y
+        glideT[glideN] = t
+        glideN++
+    }
+
+    private fun glideAddMove(ev: MotionEvent, i: Int) {
+        for (h in 0 until ev.historySize) {
+            glideAdd(ev.getHistoricalX(i, h), ev.getHistoricalY(i, h), ev.getHistoricalEventTime(h))
+        }
+        glideAdd(ev.getX(i), ev.getY(i), ev.eventTime)
+    }
+
+    private fun glideCheckStart(ev: MotionEvent) {
+        val start = glideStartKey ?: return
+        val x = glideXY[2 * glideN - 2]
+        val y = glideXY[2 * glideN - 1]
+        if (!glideLeftStart) {
+            // finger stayed on the key long enough for a long press: leave it to the key
+            if (ev.eventTime - glideDownTime >= CustomGestureView.longPressDelay) {
+                glideState = GlideState.Rejected
+                return
+            }
+            keyRectOf(start, glideRect)
+            glideRect.inset(-glideSlop, -glideSlop)
+            if (glideRect.contains(x.toInt(), y.toInt())) return
+            glideLeftStart = true
+        }
+        val g = glideGeometry() ?: return
+        val dx = (x - glideXY[0]).absoluteValue
+        val over = letterKeyAt(x, y)
+        // a mostly vertical flick stays a swipe-for-symbol gesture
+        if ((over != null && over !== start && dx > 0.5f * g.keyW) || glidePathLen > 3f * g.keyW) {
+            beginGlide(ev)
+        }
+    }
+
+    private fun beginGlide(ev: MotionEvent) {
+        glideState = GlideState.Gliding
+        // cancel whatever the key under the finger was doing (preview bubble, long press, swipe)
+        val cancel = MotionEvent.obtain(ev)
+        cancel.action = MotionEvent.ACTION_CANCEL
+        super.dispatchTouchEvent(cancel)
+        cancel.recycle()
+        trailVisible = glideTrail
+        invalidate()
+    }
+
+    private fun finishGlide(commit: Boolean) {
+        glideState = GlideState.Idle
+        if (commit && glideN >= 2) {
+            glideGeometry()?.let { onGlideGesture(glideXY.copyOf(2 * glideN), glideN, it) }
+        }
+        invalidate()
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        val mode = glideMode
+        if (mode == null || (glideState != GlideState.Gliding && !glideTyping.getValue())) {
+            return super.dispatchTouchEvent(ev)
+        }
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                glideN = 0
+                glidePathLen = 0f
+                glideLeftStart = false
+                trailVisible = false
+                val key = letterKeyAt(ev.x, ev.y)
+                glideStartKey = key
+                glidePointerId = ev.getPointerId(0)
+                glideDownTime = ev.eventTime
+                glideState =
+                    if (key != null && GlideTyping.isReady(mode)) GlideState.Tracking else GlideState.Rejected
+                glideAdd(ev.x, ev.y, ev.eventTime)
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                if (glideState == GlideState.Gliding) return true
+                glideState = GlideState.Rejected
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val i = ev.findPointerIndex(glidePointerId)
+                when (glideState) {
+                    GlideState.Tracking -> if (i >= 0) {
+                        glideAddMove(ev, i)
+                        glideCheckStart(ev)
+                        if (glideState == GlideState.Gliding) return true
+                    }
+                    GlideState.Gliding -> {
+                        if (i >= 0) glideAddMove(ev, i)
+                        if (trailVisible) invalidate()
+                        return true
+                    }
+                    else -> {}
+                }
+            }
+            MotionEvent.ACTION_POINTER_UP -> if (glideState == GlideState.Gliding) {
+                if (ev.getPointerId(ev.actionIndex) == glidePointerId) {
+                    glideAdd(ev.getX(ev.actionIndex), ev.getY(ev.actionIndex), ev.eventTime)
+                    finishGlide(true)
+                }
+                return true
+            }
+            MotionEvent.ACTION_UP -> if (glideState == GlideState.Gliding) {
+                glideAdd(ev.x, ev.y, ev.eventTime)
+                finishGlide(true)
+                return true
+            } else {
+                glideState = GlideState.Idle
+            }
+            MotionEvent.ACTION_CANCEL -> if (glideState == GlideState.Gliding) {
+                finishGlide(false)
+                return true
+            } else {
+                glideState = GlideState.Idle
+            }
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
+    override fun dispatchDraw(canvas: Canvas) {
+        super.dispatchDraw(canvas)
+        if (!trailVisible || glideN < 2) return
+        val now = SystemClock.uptimeMillis()
+        var alive = false
+        val xy = glideXY
+        for (i in 1 until glideN) {
+            val age = now - glideT[i]
+            if (age >= TrailMillis) continue
+            alive = true
+            val f = 1f - age.toFloat() / TrailMillis
+            trailPaint.strokeWidth = trailWidth * (0.3f + 0.7f * f)
+            trailPaint.alpha = (trailAlpha * f).toInt()
+            canvas.drawLine(xy[2 * i - 2], xy[2 * i - 1], xy[2 * i], xy[2 * i + 1], trailPaint)
+        }
+        if (alive) postInvalidateOnAnimation() else if (glideState != GlideState.Gliding) trailVisible = false
+    }
+
+    companion object {
+        private const val TrailMillis = 320L
     }
 
     private fun findTargetChild(x: Float, y: Float): View? {

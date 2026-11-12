@@ -104,6 +104,7 @@ class PopupComponent :
     private val scrimLoc = IntArray(2)
 
     private fun showScrim() {
+        val fresh = scrim.parent == null
         Glass.frost(listOf(inputView.keyboardView), true)
         // only dim the keyboard area (toolbar + keys), not the app behind it
         val kv = inputView.keyboardView
@@ -112,6 +113,47 @@ class PopupComponent :
             topMargin = scrimLoc[1] - rootBounds.top
         }
         if (scrim.parent == null) root.addView(scrim, 0, lp) else scrim.layoutParams = lp
+        if (fresh && !disableAnimation) {
+            scrim.alpha = 0f
+            scrim.animate().alpha(1f).setDuration(160).start()
+        }
+    }
+
+    private val disableAnimation by org.fcitx.fcitx5.android.data.prefs.AppPrefs.getInstance().advanced.disableAnimation
+
+    /** Gboard style: the popup grows out of the pressed key with a slight bounce */
+    private fun animateContainerIn(ui: PopupContainerUi) {
+        if (disableAnimation) return
+        val v = ui.root
+        v.alpha = 0f
+        v.scaleX = 0.7f
+        v.scaleY = 0.55f
+        v.translationY = context.dp(10f)
+        androidx.core.view.OneShotPreDrawListener.add(v) {
+            // grow from the trigger key: horizontally its center, vertically the bottom edge
+            v.pivotX = (ui.triggerBounds.width() / 2f - ui.offsetX).coerceIn(0f, v.width.toFloat())
+            v.pivotY = v.height.toFloat()
+        }
+        v.animate()
+            .alpha(1f).scaleX(1f).scaleY(1f).translationY(0f)
+            .setDuration(230)
+            .setInterpolator(android.view.animation.OvershootInterpolator(1.4f))
+            .start()
+    }
+
+    private fun removeContainerAnimated(ui: PopupContainerUi) {
+        val v = ui.root
+        if (disableAnimation || !v.isAttachedToWindow) {
+            root.removeView(v)
+            return
+        }
+        v.animate().cancel()
+        v.animate()
+            .alpha(0f).scaleX(0.85f).scaleY(0.8f)
+            .setDuration(110)
+            .setInterpolator(android.view.animation.AccelerateInterpolator())
+            .withEndAction { root.removeView(v) }
+            .start()
     }
 
     private fun hideScrimIfIdle() {
@@ -253,6 +295,7 @@ class PopupComponent :
             })
         }
         showingContainerUi[viewId] = ui
+        animateContainerIn(ui)
     }
 
     private fun changeFocus(viewId: Int, x: Float, y: Float): Boolean {
@@ -282,7 +325,7 @@ class PopupComponent :
     private fun dismissPopupContainer(viewId: Int) {
         showingContainerUi[viewId]?.also {
             showingContainerUi.remove(viewId)
-            root.removeView(it.root)
+            removeContainerAnimated(it)
         }
         hideScrimIfIdle()
     }
@@ -301,6 +344,7 @@ class PopupComponent :
         dismissJobs.clear()
         // too
         showingContainerUi.forEach { (_, container) ->
+            container.root.animate().cancel()
             root.removeView(container.root)
         }
         showingContainerUi.clear()

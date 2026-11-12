@@ -54,7 +54,7 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
         val keyboardHeightPercentBase = enumList(
             R.string.keyboard_height_percent_base,
             "keyboard_height_percent_base",
-            KeyboardHeightPercentBase.DisplayMetrics
+            KeyboardHeightPercentBase.Gboard
         )
     }
 
@@ -177,6 +177,11 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
         )
         val spaceSwipeMoveCursor =
             switch(R.string.space_swipe_move_cursor, "space_swipe_move_cursor", true)
+        // Gboard style glide typing on the letter keyboard
+        val glideTyping = switch(R.string.glide_typing, "glide_typing", true)
+        val glideTypingTrail = switch(R.string.glide_typing_trail, "glide_typing_trail", true) {
+            glideTyping.getValue()
+        }
         // Gboard style English typing (English keyboard only)
         val englishAutoCorrect =
             switch(R.string.gb_auto_correct, "gb_auto_correct", true)

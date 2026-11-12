@@ -5,6 +5,7 @@
 package org.fcitx.fcitx5.android.input.picker
 
 import androidx.core.content.ContextCompat
+import androidx.recyclerview.widget.RecyclerView
 import androidx.transition.Transition
 import androidx.viewpager2.widget.ViewPager2
 import org.fcitx.fcitx5.android.data.theme.ThemeManager
@@ -49,10 +50,18 @@ class PickerWindow(
 
     private lateinit var pickerLayout: PickerLayout
     private lateinit var pickerPagesAdapter: PickerPagesAdapter
+    private lateinit var pickerListAdapter: PickerListAdapter
+
+    // Gboard style: emoji and emoticons scroll vertically, symbols keep horizontal pages
+    private val vertical = key != Key.Symbol
 
     override fun enterAnimation(lastWindow: InputWindow): Transition? = null
 
-    override fun exitAnimation(nextWindow: InputWindow): Transition? = null
+    override fun exitAnimation(nextWindow: InputWindow): Transition? =
+        if (key == Key.Symbol) null else super.exitAnimation(nextWindow)
+
+    // Gboard: the emoji panel rises in; the symbol picker switches instantly like a layout
+    override fun animateEnter(lastWindow: InputWindow) = key != Key.Symbol
 
     private val keyActionListener = KeyActionListener { it, source ->
         when (it) {
@@ -75,7 +84,8 @@ class PickerWindow(
 
             else -> {
                 if (it is KeyAction.CommitAction) {
-                    pickerPagesAdapter.insertRecent(it.text)
+                    if (vertical) pickerListAdapter.insertRecent(it.text)
+                    else pickerPagesAdapter.insertRecent(it.text)
                 }
                 commonKeyActionListener.listener.onKeyAction(it, source)
             }
@@ -91,10 +101,12 @@ class PickerWindow(
                 is PopupAction.ShowKeyboardAction -> {
                     // prevent ViewPager from consuming swipe gesture when popup keyboard shown
                     pickerLayout.pager.isUserInputEnabled = false
+                    pickerLayout.listLayoutManager.scrollEnabled = false
                 }
                 is PopupAction.DismissAction -> {
                     // restore ViewPager scrolling
                     pickerLayout.pager.isUserInputEnabled = true
+                    pickerLayout.listLayoutManager.scrollEnabled = true
                 }
                 else -> {}
             }
@@ -102,9 +114,13 @@ class PickerWindow(
         }
     }
 
-    override fun onCreateView() = PickerLayout(context, theme, switchKey, key).apply {
+    override fun onCreateView() = PickerLayout(context, theme, switchKey, key, vertical).apply {
         pickerLayout = this
         val bordered = followKeyBorder && keyBorder
+        if (vertical) {
+            setupVerticalList(bordered)
+            return@apply
+        }
         pickerPagesAdapter = PickerPagesAdapter(
             theme, keyActionListener, popupActionListener, data,
             density, key.name, bordered, policy
@@ -143,11 +159,48 @@ class PickerWindow(
         }
     }
 
+    private fun PickerLayout.setupVerticalList(bordered: Boolean) {
+        val rows = if (density == PickerPageUi.Density.EmoticonRow) 3.5f else 4.5f
+        pickerListAdapter = PickerListAdapter(
+            theme, keyActionListener, popupActionListener, data,
+            density, key.name, bordered, policy, rows
+        )
+        tabsUi.apply {
+            setTabs(pickerListAdapter.getCategoryList())
+            setOnTabClickListener { i ->
+                popup.dismissAll()
+                listLayoutManager.scrollToPositionWithOffset(pickerListAdapter.getCategoryStart(i), 0)
+                tabsUi.activateTab(i)
+            }
+        }
+        list.adapter = pickerListAdapter
+        tabsUi.activateTab(pickerListAdapter.getCategoryIndexOfRow(0))
+        list.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+            override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
+                if (newState == RecyclerView.SCROLL_STATE_DRAGGING) popup.dismissAll()
+            }
+
+            override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                if (dy == 0) return
+                val first = listLayoutManager.findFirstVisibleItemPosition()
+                // at the very end, highlight the last category even if its header never reaches the top
+                val row = if (!recyclerView.canScrollVertically(1)) pickerListAdapter.itemCount - 1 else first
+                tabsUi.activateTab(pickerListAdapter.getCategoryIndexOfRow(row))
+            }
+        })
+    }
+
     override fun onCreateBarExtension() = pickerLayout.tabsUi.root
 
     override fun onAttached() {
         pickerLayout.embeddedKeyboard.also {
-            pickerPagesAdapter.refreshIfNeeded()
+            if (vertical) {
+                pickerListAdapter.refresh()
+                pickerLayout.listLayoutManager.scrollToPositionWithOffset(0, 0)
+                pickerLayout.tabsUi.activateTab(pickerListAdapter.getCategoryIndexOfRow(0))
+            } else {
+                pickerPagesAdapter.refreshIfNeeded()
+            }
             it.onReturnDrawableUpdate(returnKeyDrawable.resourceId)
             it.keyActionListener = keyActionListener
         }

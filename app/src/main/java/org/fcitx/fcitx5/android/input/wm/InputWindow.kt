@@ -34,6 +34,12 @@ sealed class InputWindow : Dependent {
     open fun exitAnimation(nextWindow: InputWindow): Transition? = Fade().apply { duration = 90 }
 
     /**
+     * Ifboard: whether the window's view should rise in (fade + short slide up) when it replaces
+     * [lastWindow]. When true, [enterAnimation] is not used.
+     */
+    open fun animateEnter(lastWindow: InputWindow): Boolean = true
+
+    /**
      * After the window was set up in dynamic scope
      */
     abstract fun onCreateView(): View

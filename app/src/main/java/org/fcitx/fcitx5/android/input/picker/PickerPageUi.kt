@@ -69,7 +69,11 @@ class PickerPageUi(
         Medium(32, 8, 4, 22f, false, false),
 
         // emoticon: 4/4/4, no backspace
-        Low(12, 4, 3, 19f, true, false)
+        Low(12, 4, 3, 19f, true, false),
+
+        // Gboard style vertical lists: one row per item
+        EmojiRow(8, 8, 1, 22f, false, false),
+        EmoticonRow(4, 4, 1, 19f, true, false)
     }
 
     private val popupOnKeyPress by AppPrefs.getInstance().keyboard.popupOnKeyPress

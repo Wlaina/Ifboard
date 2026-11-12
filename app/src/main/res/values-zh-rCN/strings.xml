@@ -263,6 +263,8 @@
     <string name="open_rime_user_data_dir">即将打开应用数据目录。 RIME 用户数据目录位于“data/rime”。</string>
     <string name="restart_to_apply_settings">应用将重启以应用新设置。继续吗？</string>
     <string name="space_swipe_move_cursor">划动空格键以移动光标</string>
+    <string name="glide_typing">滑行输入</string>
+    <string name="glide_typing_trail">显示滑行轨迹</string>
     <string name="please_wait">请稍候…</string>
     <string name="rotate">旋转</string>
     <string name="flip">翻转</string>
@@ -319,6 +321,7 @@
     <string name="preferred_voice_input">首选语音输入</string>
     <string name="edit_text_playground">文本输入框 (EditText) 演练场</string>
     <string name="keyboard_height_percent_base">键盘高度百分比</string>
+    <string name="ifb_height_base_gboard">固定高度（各手机都与 Gboard 一致）</string>
     <string name="display_metrics">显示指标 (Resources.getDisplayMetrics)</string>
     <string name="real_size">真实尺寸 (Display.getRealSize)</string>
     <string name="gb_auto_correct">英文自动纠错</string>

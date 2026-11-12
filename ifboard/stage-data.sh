@@ -28,6 +28,18 @@ cp "$RIME_ICE_DIR"/*.schema.yaml "$RIME_ICE_DIR"/*.dict.yaml "$RIME_ICE_DIR"/sym
 U=$A/ifboard
 rm -rf $U; mkdir -p $U/rime/sync $U/config/conf
 cp "$RESTORE_DIR/Android/double_pinyin_flypy.custom.yaml" "$RESTORE_DIR/default.custom.yaml" $U/rime/
+if [ "${INCLUDE_USERDB:-1}" != "1" ]; then
+  # public release: new users start with full pinyin (雾凇拼音); 小鹤双拼 stays available in the schema list
+  sed -i 's/^\( *\)- schema: double_pinyin_flypy.*$/\1- schema: rime_ice  # 雾凇拼音 - 全拼\n\1- schema: double_pinyin_flypy  # 雾凇拼音 - 小鹤双拼/' $U/rime/default.custom.yaml
+  grep -q "schema: rime_ice" $U/rime/default.custom.yaml || { echo "default.custom.yaml: schema_list not patched" >&2; exit 1; }
+  # same grammar model for full pinyin as the double pinyin setup
+  if [ -f "$RIME_ICE_DIR/wanxiang-lts-zh-hans.gram" ]; then
+    printf '%s\n' 'patch:' '  grammar:' '    language: wanxiang-lts-zh-hans' '    collocation_max_length: 6' \
+      '    collocation_min_length: 3' '    collocation_penalty: -14' '    non_collocation_penalty: -6' \
+      '    weak_collocation_penalty: -100' '    rear_penalty: -20' '  translator/contextual_suggestions: false' \
+      '  translator/max_homophones: 8' > $U/rime/rime_ice.custom.yaml
+  fi
+fi
 cp "$RIME_ICE_DIR"/custom_phrase*.txt $U/rime/
 # personal typing history only goes into local builds (INCLUDE_USERDB=0 for public releases)
 [ "${INCLUDE_USERDB:-1}" = "1" ] && for d in "$SYNC_DIR"/PC-*; do [ -f "$d/rime_ice.userdb.txt" ] && mkdir -p "$U/rime/sync/$(basename "$d")" && cp "$d/rime_ice.userdb.txt" "$U/rime/sync/$(basename "$d")/"; done

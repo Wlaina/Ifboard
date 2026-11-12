@@ -175,6 +175,8 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
             delay(timeout)
             isClipboardFresh = false
             clipboardTimeoutJob = null
+            // the suggestion used to stay until something else refreshed the bar
+            evalIdleUiState()
         }
     }
 
@@ -492,6 +494,13 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
             // keep the toolbar like Gboard; grid icon becomes a close icon
             statusPanelShown = true
             idleUi.menuButton.setIcon(R.drawable.ic_gb_close)
+            // opening the menu brings the normal toolbar back (the copied text is still in the clipboard panel)
+            if (isClipboardFresh) {
+                isClipboardFresh = false
+                clipboardTimeoutJob?.cancel()
+                clipboardTimeoutJob = null
+                evalIdleUiState(fromUser = true)
+            }
             return
         }
         when (window) {

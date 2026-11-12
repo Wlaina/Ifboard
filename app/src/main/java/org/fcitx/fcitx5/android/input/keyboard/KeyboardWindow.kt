@@ -59,9 +59,12 @@ class KeyboardWindow : InputWindow.SimpleInputWindow<KeyboardWindow>(), Essentia
 
     override fun exitAnimation(nextWindow: InputWindow) =
         super.exitAnimation(nextWindow).takeIf {
-            // disable animation switching between picker
-            nextWindow !is PickerWindow
+            // disable animation switching to the symbol picker
+            !(nextWindow is PickerWindow && nextWindow.key == PickerWindow.Key.Symbol)
         }
+
+    override fun animateEnter(lastWindow: InputWindow) =
+        !(lastWindow is PickerWindow && lastWindow.key == PickerWindow.Key.Symbol)
 
     private lateinit var keyboardView: FrameLayout
 
@@ -86,6 +89,15 @@ class KeyboardWindow : InputWindow.SimpleInputWindow<KeyboardWindow>(), Essentia
 
     private val keyActionListener = KeyActionListener { it, source ->
         if (englishAssist.beforeKeyAction(it)) return@KeyActionListener
+        if (it is KeyAction.GlideWordAction) {
+            // Gboard: a glided word gets a space in front when it follows another word
+            val before = service.currentInputConnection?.getTextBeforeCursor(1, 0)?.lastOrNull()
+            val space = before != null && (before.isLetterOrDigit() || before in ".,!?;:")
+            commonKeyActionListener.listener.onKeyAction(
+                KeyAction.CommitAction(if (space) " ${it.word}" else it.word), source
+            )
+            return@KeyActionListener
+        }
         if (it is KeyAction.LayoutSwitchAction) {
             switchLayout(it.act)
         } else {

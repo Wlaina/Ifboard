@@ -33,6 +33,7 @@ import org.fcitx.fcitx5.android.input.broadcast.PunctuationComponent
 import org.fcitx.fcitx5.android.input.broadcast.ReturnKeyDrawableComponent
 import org.fcitx.fcitx5.android.input.candidates.horizontal.HorizontalCandidateComponent
 import org.fcitx.fcitx5.android.input.keyboard.CommonKeyActionListener
+import org.fcitx.fcitx5.android.input.keyboard.KeyboardHeightPercentBase
 import org.fcitx.fcitx5.android.input.keyboard.KeyboardHeightPercentBase.DisplayMetrics
 import org.fcitx.fcitx5.android.input.keyboard.KeyboardHeightPercentBase.RealSize
 import org.fcitx.fcitx5.android.input.keyboard.KeyboardWindow
@@ -126,6 +127,12 @@ class InputView(
         org.fcitx.fcitx5.android.input.inline.VoiceBar(themedContext, theme, service) {
             val ime = fcitx.runImmediately { inputMethodEntryCached }
             if (ime.uniqueName.startsWith("keyboard-")) "en-US" else "zh-CN"
+        }.apply {
+            // hide the toolbar underneath completely while listening (the bar may be translucent)
+            onActiveChanged = { on ->
+                kawaiiBar.view.animate().cancel()
+                kawaiiBar.view.animate().alpha(if (on) 0f else 1f).setDuration(150).start()
+            }
         }
     }
     private val horizontalCandidate = HorizontalCandidateComponent()
@@ -180,7 +187,11 @@ class InputView(
     private val keyboardHeightPx: Int
         get() {
             val baseType = keyboardHeightPercentBase.getValue()
+            val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
             val base = when (baseType) {
+                // Gboard default height measured on a 1200x2670 @480dpi phone: 240dp portrait, 196dp landscape
+                KeyboardHeightPercentBase.Gboard ->
+                    (resources.displayMetrics.density * (if (landscape) 196f / 49f else 240f / 27f) * 100f).toInt()
                 DisplayMetrics -> resources.displayMetrics.heightPixels
                 RealSize -> Point().also {
                     @Suppress("DEPRECATION")

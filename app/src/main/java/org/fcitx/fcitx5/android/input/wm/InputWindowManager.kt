@@ -123,12 +123,14 @@ class InputWindowManager : UniqueViewComponent<InputWindowManager, FrameLayout>(
             scope += window
             window.onCreateView()
         }
+        var riseIn = false
         if (currentWindow != null) {
             val oldWindow = currentWindow!!
             val oldView = currentView!!
+            riseIn = !disableAnimation && window.animateEnter(oldWindow)
             prepareAnimation(
                 oldWindow.exitAnimation(window),
-                window.enterAnimation(oldWindow),
+                if (riseIn) null else window.enterAnimation(oldWindow),
                 oldView,
                 newView
             )
@@ -148,6 +150,21 @@ class InputWindowManager : UniqueViewComponent<InputWindowManager, FrameLayout>(
             window.beforeAttached()
         // add the new window to layout
         view.apply { add(newView, lParams(matchParent, matchParent)) }
+        newView.animate().cancel()
+        if (riseIn) {
+            // Gboard style panel transition: fade in while rising a little
+            newView.alpha = 0f
+            newView.translationY = newView.resources.displayMetrics.density * 28f
+            newView.animate()
+                .alpha(1f)
+                .translationY(0f)
+                .setDuration(260)
+                .setInterpolator(android.view.animation.PathInterpolator(0.05f, 0.7f, 0.1f, 1f))
+                .start()
+        } else {
+            newView.alpha = 1f
+            newView.translationY = 0f
+        }
         currentView = newView
         Timber.d("Attach $window")
         // notify the window it was attached

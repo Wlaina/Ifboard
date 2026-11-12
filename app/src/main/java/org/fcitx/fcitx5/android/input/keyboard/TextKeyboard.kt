@@ -127,6 +127,46 @@ class TextKeyboard(
         }
     }
 
+    // ---- glide typing
+    private var imeName = ""
+    private var imeSubMode = ""
+
+    override val glideMode: GlideTyping.Mode?
+        get() = when {
+            imeName == "rime" -> when {
+                // Rime reports the current schema name as sub mode
+                imeSubMode.contains("小鹤") || imeSubMode.contains("flypy") -> GlideTyping.Mode.Flypy
+                imeSubMode.contains("双拼") -> null // other double pinyin layouts are not supported
+                else -> GlideTyping.Mode.Pinyin
+            }
+            imeName.startsWith("keyboard-us") -> GlideTyping.Mode.English
+            else -> null
+        }
+
+    override fun onGlideGesture(xy: FloatArray, n: Int, geometry: GlideTyping.Geometry) {
+        val mode = glideMode ?: return
+        val best = GlideTyping.decode(xy, n, geometry, mode).firstOrNull() ?: return
+        when (mode) {
+            GlideTyping.Mode.Pinyin, GlideTyping.Mode.Flypy -> best.code.forEach {
+                // bypass caps handling: Rime always gets lowercase key presses
+                super.onAction(KeyAction.FcitxKeyAction(it.toString()), KeyActionListener.Source.Keyboard)
+            }
+            GlideTyping.Mode.English -> {
+                val word = when (capsState) {
+                    CapsState.None -> best.output
+                    CapsState.Once -> best.output.replaceFirstChar { it.uppercaseChar() }.also { switchCapsState() }
+                    CapsState.Lock -> best.output.uppercase()
+                }
+                super.onAction(KeyAction.GlideWordAction(word), KeyActionListener.Source.Keyboard)
+            }
+        }
+    }
+
+    private fun prepareGlide() {
+        if (!AppPrefs.getInstance().keyboard.glideTyping.getValue()) return
+        glideMode?.let { GlideTyping.prepare(context, it) }
+    }
+
     private var punctuationMapping: Map<String, String> = mapOf()
     private fun transformPunctuation(p: String) = punctuationMapping.getOrDefault(p, p)
 
@@ -167,6 +207,7 @@ class TextKeyboard(
     }
 
     override fun onAttach() {
+        prepareGlide()
         capsState = CapsState.None
         updateCapsButtonIcon()
         updateAlphabetKeys()
@@ -182,6 +223,9 @@ class TextKeyboard(
     }
 
     override fun onInputMethodUpdate(ime: InputMethodEntry) {
+        imeName = ime.uniqueName
+        imeSubMode = ime.subMode.run { "$name $label" }
+        prepareGlide()
         // Gboard style space bar label, plus a small signature so it is not mistaken for Gboard:
         // "雾凇拼音" and a tiny terracotta dot (same accent as the PC Weasel theme)
         val label = when {

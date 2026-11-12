@@ -21,6 +21,9 @@ sealed class KeyAction {
 
     data class CommitAction(val text: String) : KeyAction()
 
+    // a word produced by glide typing on the English keyboard (space is added when needed)
+    data class GlideWordAction(val word: String) : KeyAction()
+
     data class CapsAction(val lock: Boolean) : KeyAction()
 
     data object QuickPhraseAction : KeyAction()

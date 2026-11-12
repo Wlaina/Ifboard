@@ -191,7 +191,17 @@ class TranslatePanel(
             if (service.textInterceptor === this) service.textInterceptor = null
             job?.cancel()
         }
-        root.visibility = if (on) View.VISIBLE else View.GONE
+        root.animate().cancel()
+        if (on) {
+            root.visibility = View.VISIBLE
+            root.alpha = 0f
+            root.translationY = ctx.dpf(10f)
+            root.animate().alpha(1f).translationY(0f).setDuration(220)
+                .setInterpolator(android.view.animation.DecelerateInterpolator(2f)).start()
+        } else {
+            root.animate().alpha(0f).setDuration(120)
+                .withEndAction { if (!active) root.visibility = View.GONE }.start()
+        }
         updateInput()
         onActiveChanged?.invoke(on)
     }
@@ -282,6 +292,9 @@ class VoiceBar(
     var active = false
         private set
 
+    /** Ifboard: lets the input view hide the toolbar underneath while listening */
+    var onActiveChanged: ((Boolean) -> Unit)? = null
+
     private val status = TextView(ctx).apply {
         textSize = 15f
         gravity = Gravity.CENTER
@@ -289,6 +302,15 @@ class VoiceBar(
         ellipsize = TextUtils.TruncateAt.START
         setTextColor(theme.keyTextColor)
         GboardFont.get(ctx)?.let { typeface = it }
+    }
+
+    // Gboard style: a soft ring behind the mic follows the voice level (stays inside the bar)
+    private val pulse = View(ctx).apply {
+        background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(theme.genericActiveBackgroundColor)
+        }
+        alpha = 0.3f
     }
 
     private val mic = ImageView(ctx).apply {
@@ -320,8 +342,11 @@ class VoiceBar(
         addView(status, FrameLayout.LayoutParams(-1, -1).apply {
             leftMargin = ctx.dpi(56); rightMargin = ctx.dpi(56)
         })
-        addView(mic, FrameLayout.LayoutParams(ctx.dpi(34), ctx.dpi(34), Gravity.END or Gravity.CENTER_VERTICAL).apply {
-            rightMargin = ctx.dpi(7)
+        addView(pulse, FrameLayout.LayoutParams(ctx.dpi(MicSize), ctx.dpi(MicSize), Gravity.END or Gravity.CENTER_VERTICAL).apply {
+            rightMargin = ctx.dpi(9)
+        })
+        addView(mic, FrameLayout.LayoutParams(ctx.dpi(MicSize), ctx.dpi(MicSize), Gravity.END or Gravity.CENTER_VERTICAL).apply {
+            rightMargin = ctx.dpi(9)
         })
     }
 
@@ -329,11 +354,12 @@ class VoiceBar(
         override fun onReadyForSpeech(params: Bundle?) { status.text = "正在听取…" }
         override fun onBeginningOfSpeech() {}
         override fun onRmsChanged(rmsdB: Float) {
-            val s = 1f + (rmsdB.coerceIn(0f, 10f)) / 40f
-            mic.scaleX = s; mic.scaleY = s
+            // at most 38dp across, the bar is 40dp high
+            val s = 1f + (rmsdB.coerceIn(0f, 10f) / 10f) * (MaxPulse - 1f)
+            pulse.animate().scaleX(s).scaleY(s).setDuration(90).start()
         }
         override fun onBufferReceived(buffer: ByteArray?) {}
-        override fun onEndOfSpeech() { mic.scaleX = 1f; mic.scaleY = 1f }
+        override fun onEndOfSpeech() { pulse.animate().scaleX(1f).scaleY(1f).setDuration(150).start() }
         override fun onError(error: Int) {
             listening = false
             service.currentInputConnection?.finishComposingText()
@@ -365,14 +391,24 @@ class VoiceBar(
     fun start() {
         if (active) { stop(); return }
         active = true
+        root.animate().cancel()
         root.visibility = View.VISIBLE
+        root.alpha = 0f
+        root.animate().alpha(1f).setDuration(180).start()
+        mic.scaleX = 0.5f; mic.scaleY = 0.5f
+        mic.animate().scaleX(1f).scaleY(1f).setDuration(260)
+            .setInterpolator(android.view.animation.OvershootInterpolator(2.5f)).start()
         status.text = "正在听取…"
+        onActiveChanged?.invoke(true)
         listen()
     }
 
     private fun listen() {
         if (ContextCompat.checkSelfPermission(service, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            status.text = "需要麦克风权限"
+            // a fresh install has no microphone permission yet: ask for it like Gboard does
+            status.text = "需要麦克风权限，请在弹出的窗口中允许"
+            runCatching { org.fcitx.fcitx5.android.ui.main.MicPermissionActivity.launch(service) }
+            handler.postDelayed({ stop() }, 1500)
             return
         }
         val r = recognizer ?: SpeechRecognizer.createSpeechRecognizer(service).also {
@@ -394,7 +430,15 @@ class VoiceBar(
         handler.removeCallbacksAndMessages(null)
         recognizer?.destroy(); recognizer = null
         service.currentInputConnection?.finishComposingText()
-        mic.scaleX = 1f; mic.scaleY = 1f
-        root.visibility = View.GONE
+        pulse.animate().cancel()
+        pulse.scaleX = 1f; pulse.scaleY = 1f
+        root.animate().cancel()
+        root.animate().alpha(0f).setDuration(140).withEndAction { if (!active) root.visibility = View.GONE }.start()
+        onActiveChanged?.invoke(false)
+    }
+
+    companion object {
+        private const val MicSize = 30
+        private const val MaxPulse = 38f / MicSize
     }
 }
