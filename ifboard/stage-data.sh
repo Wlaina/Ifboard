@@ -24,9 +24,9 @@ cp -r "$RIME_ICE_DIR"/cn_dicts "$RIME_ICE_DIR"/en_dicts "$RIME_ICE_DIR"/lua "$RI
 cp "$RIME_ICE_DIR"/*.schema.yaml "$RIME_ICE_DIR"/*.dict.yaml "$RIME_ICE_DIR"/symbols_*.yaml \
    "$RIME_ICE_DIR"/default.yaml "$RIME_ICE_DIR"/recipe.yaml $R/
 [ -f "$RIME_ICE_DIR/wanxiang-lts-zh-hans.gram" ] && cp "$RIME_ICE_DIR/wanxiang-lts-zh-hans.gram" $R/
-# the full pinyin schema (雾凇拼音) must always be there: fall back to rime-ice's own no-lua copy
-if [ ! -f "$R/rime_ice.schema.yaml" ]; then
-  cp "$RIME_ICE_DIR/others/no_lua_schema/rime_ice.schema.yaml" $R/ || { echo "rime_ice.schema.yaml not found" >&2; exit 1; }
+# the full pinyin schema (雾凇拼音, default for new users) must always be there
+if [ ! -f "$RIME_ICE_DIR/rime_ice.schema.yaml" ]; then
+  cp ifboard/data/rime_ice.schema.yaml $R/ || { echo "rime_ice.schema.yaml not found" >&2; exit 1; }
 fi
 # 3. first-run import
 U=$A/ifboard
