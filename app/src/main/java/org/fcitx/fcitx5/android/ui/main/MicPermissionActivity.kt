@@ -49,7 +49,8 @@ class MicPermissionActivity : Activity() {
 
     companion object {
         fun launch(context: android.content.Context) {
-            context.startActivity(
+            org.fcitx.fcitx5.android.ifboard.BackgroundStart.startFromIme(
+                context,
                 Intent(context, MicPermissionActivity::class.java)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
             )

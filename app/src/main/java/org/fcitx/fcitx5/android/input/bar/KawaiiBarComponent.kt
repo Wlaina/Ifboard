@@ -497,14 +497,14 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
     private fun applyVoiceButton(capFlags: CapabilityFlags) {
         // Gboard style: voice typing inside the keyboard via system SpeechRecognizer;
         // fall back to switching to a voice IME when no recognition service exists
+        // Gboard always shows the mic; when this phone has no usable recognizer the voice bar says so
         val builtinVoice = builtinVoiceCached == true
-        val shouldShowVoiceInput = showVoiceInputButton && !capFlags.has(CapabilityFlag.Password) &&
-                (builtinVoice || voiceInputSubtype != null)
+        val shouldShowVoiceInput = showVoiceInputButton && !capFlags.has(CapabilityFlag.Password)
         idleUi.setHideKeyboardIsVoiceInput(
             shouldShowVoiceInput,
             when {
                 !shouldShowVoiceInput -> hideKeyboardCallback
-                builtinVoice -> View.OnClickListener { inputView.voiceBar.start() }
+                builtinVoice || voiceInputSubtype == null -> View.OnClickListener { inputView.voiceBar.start() }
                 else -> switchToVoiceInputCallback
             }
         )

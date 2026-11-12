@@ -135,6 +135,7 @@ class FcitxApplication : Application() {
         }
         // Ifboard: import the bundled setup before fcitx reads its config
         if (!isDirectBootMode) org.fcitx.fcitx5.android.ifboard.Bootstrap.run(this)
+        org.fcitx.fcitx5.android.ifboard.BackgroundStart.register(this)
         ClipboardManager.init(ctx)
         ThemeManager.init(resources.configuration)
         Locales.onLocaleChange(resources.configuration)

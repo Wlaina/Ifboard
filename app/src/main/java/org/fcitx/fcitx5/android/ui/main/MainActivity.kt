@@ -77,6 +77,31 @@ class MainActivity : AppCompatActivity() {
         checkNotificationPermission()
     }
 
+    override fun onResume() {
+        super.onResume()
+        promptBackgroundStart()
+    }
+
+    private var bgStartDialog: androidx.appcompat.app.AlertDialog? = null
+
+    /** Ifboard: vivo / Xiaomi block pages opened from the keyboard until "后台弹出界面" is allowed */
+    private fun promptBackgroundStart() {
+        val bg = org.fcitx.fcitx5.android.ifboard.BackgroundStart
+        val version = org.fcitx.fcitx5.android.BuildConfig.VERSION_NAME
+        if (bgStartDialog?.isShowing == true || !bg.shouldPrompt(this, version)) return
+        val brand = if (bg.vendor == org.fcitx.fcitx5.android.ifboard.BackgroundStart.Vendor.Vivo) "vivo" else "小米"
+        bgStartDialog = androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("允许从键盘打开页面")
+            .setMessage(
+                "$brand 系统默认禁止新装的应用「后台弹出界面」，所以键盘上的设置按钮、菜单里的选项、" +
+                        "剪贴板编辑和语音的麦克风授权都打不开。\n\n" +
+                        "点「去开启」，在权限页里打开「后台弹出界面」即可，只需要设置一次。"
+            )
+            .setPositiveButton("去开启") { _, _ -> bg.openPermissionPage(this) }
+            .setNegativeButton("以后再说") { _, _ -> bg.snooze(this, version) }
+            .show()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         processIntent(intent)

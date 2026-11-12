@@ -408,6 +408,11 @@ class VoiceBar(
                 SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
                     if (active) handler.postDelayed({ if (active) listen() }, 200)
                 SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> status.text = "需要麦克风权限"
+                SpeechRecognizer.ERROR_CLIENT, SpeechRecognizer.ERROR_SERVER_DISCONNECTED -> {
+                    // the recognition service could not be reached (e.g. hidden by the system)
+                    recognizer?.destroy(); recognizer = null
+                    showUnavailable()
+                }
                 SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> status.text = "网络不可用"
                 else -> status.text = "语音识别暂不可用"
             }
@@ -452,8 +457,11 @@ class VoiceBar(
             handler.postDelayed({ stop() }, 1500)
             return
         }
-        val r = recognizer ?: SpeechRecognizer.createSpeechRecognizer(service).also {
+        val r = recognizer ?: createRecognizer()?.also {
             it.setRecognitionListener(listener); recognizer = it
+        } ?: run {
+            showUnavailable()
+            return
         }
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -463,6 +471,30 @@ class VoiceBar(
         }
         listening = true
         r.startListening(intent)
+    }
+
+    /** system recognizer, else the on-device one, else Google's service addressed directly */
+    private fun createRecognizer(): SpeechRecognizer? = runCatching {
+        when {
+            SpeechRecognizer.isRecognitionAvailable(service) -> SpeechRecognizer.createSpeechRecognizer(service)
+            android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S &&
+                    SpeechRecognizer.isOnDeviceRecognitionAvailable(service) ->
+                SpeechRecognizer.createOnDeviceSpeechRecognizer(service)
+            googleRecognizerInstalled() -> SpeechRecognizer.createSpeechRecognizer(
+                service, android.content.ComponentName(GooglePackage, GoogleRecognizer)
+            )
+            else -> null
+        }
+    }.getOrNull()
+
+    private fun googleRecognizerInstalled() = runCatching {
+        service.packageManager.getPackageInfo(GooglePackage, 0); true
+    }.getOrDefault(false)
+
+    private fun showUnavailable() {
+        listening = false
+        status.text = "这台手机没有可用的语音识别服务"
+        handler.postDelayed({ if (active) stop() }, 2500)
     }
 
     fun stop() {
@@ -480,6 +512,8 @@ class VoiceBar(
 
     companion object {
         private const val MicSize = 30
+        private const val GooglePackage = "com.google.android.googlequicksearchbox"
+        private const val GoogleRecognizer = "com.google.android.voicesearch.serviceapi.GoogleRecognitionService"
         private const val MaxPulse = 38f / MicSize
     }
 }

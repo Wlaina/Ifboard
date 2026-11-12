@@ -38,6 +38,8 @@
             <data android:mimeType="text/plain" />
         </intent>
         <package android:name="com.google.android.apps.translate" />
+        <!-- Ifboard: voice typing can address Google's recognizer directly -->
+        <package android:name="com.google.android.googlequicksearchbox" />
         <intent>
             <action android:name="android.view.InputMethod" />
         </intent>

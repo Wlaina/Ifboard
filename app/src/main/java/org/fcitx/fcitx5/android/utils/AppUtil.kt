@@ -15,22 +15,24 @@ import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.ui.main.ClipboardEditActivity
 import org.fcitx.fcitx5.android.ui.main.MainActivity
 import org.fcitx.fcitx5.android.ui.main.settings.SettingsRoute
+import org.fcitx.fcitx5.android.ifboard.BackgroundStart
 import kotlin.system.exitProcess
 
 object AppUtil {
 
+    // Ifboard: pages opened from the keyboard go through BackgroundStart (vivo / Xiaomi may block them)
     fun launchMain(context: Context) {
-        context.startActivity<MainActivity> {
+        BackgroundStart.startFromIme(context, Intent(context, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS)
-        }
+        })
     }
 
     private fun launchMainToDest(context: Context, route: SettingsRoute) {
-        context.startActivity<MainActivity> {
+        BackgroundStart.startFromIme(context, Intent(context, MainActivity::class.java).apply {
             action = Intent.ACTION_RUN
             putExtra(MainActivity.EXTRA_SETTINGS_ROUTE, route)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS)
-        }
+        })
     }
 
     fun launchMainToKeyboard(context: Context) =
@@ -46,11 +48,11 @@ object AppUtil {
         launchMainToDest(context, SettingsRoute.InputMethodConfig(displayName, uniqueName))
 
     fun launchClipboardEdit(context: Context, id: Int, lastEntry: Boolean = false) {
-        context.startActivity<ClipboardEditActivity> {
+        BackgroundStart.startFromIme(context, Intent(context, ClipboardEditActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             putExtra(ClipboardEditActivity.ENTRY_ID, id)
             putExtra(ClipboardEditActivity.LAST_ENTRY, lastEntry)
-        }
+        })
     }
 
     fun exit() {
