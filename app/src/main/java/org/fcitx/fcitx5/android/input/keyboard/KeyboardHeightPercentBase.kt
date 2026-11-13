@@ -50,8 +50,8 @@ enum class KeyboardHeightPercentBase(override val stringRes: Int) : ManagedPrefe
         private const val GBOARD_LANDSCAPE_HEADER_DP = 41f
         private const val GBOARD_LANDSCAPE_BODY_MM = 28.5f
 
-        // IFboard 默认自带工具栏 40dp + 底部留白（竖屏 5dp / 横屏 0dp），从 Gboard 总高度扣除后得到按键区高度
-        private const val IFB_PORTRAIT_CHROME_DP = 45f
+        // IFboard 竖屏 chrome：工具栏 44dp + 顶部呼吸留白（约 2~3dp）+ 底部留白 5dp = 52dp（与 Gboard 顶沿到第 1 行留白对齐）
+        private const val IFB_PORTRAIT_CHROME_DP = 52f
         private const val IFB_LANDSCAPE_CHROME_DP = 40f
         private const val MM_PER_INCH = 25.4f
 

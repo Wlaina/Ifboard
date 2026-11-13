@@ -9,23 +9,23 @@ class KeyboardHeightTest {
 
     @Test
     fun `portrait matches Gboard physical height across different ydpi at same 480dpi`() {
-        // 小米 14 (1200x2670, density=3.0, ydpi=460.407)：Gboard Header 132 + Body 732 = 864px；扣除工具栏与底边距 135px -> 729px
+        // 小米 14 (1200x2670, density=3.0, ydpi=460.407)：Gboard Header 132 + Body 732 = 864px；扣除工具栏与上下留白 156px -> 708px
         val xiaomiKeyArea = KeyboardHeightPercentBase.computeGboardHeightPx(
             density = 3.0f,
             ydpi = 460.407f,
             percent = 27,
             landscape = false
         )
-        assertEquals(729, xiaomiKeyArea)
+        assertEquals(708, xiaomiKeyArea)
 
-        // vivo (1080x2376, density=3.0, ydpi=397.042)：Gboard Header 132 + Body 633 = 765px；扣除 135px -> 629px
+        // vivo (1080x2376, density=3.0, ydpi=397.042)：Gboard Header 132 + Body 633 = 765px；扣除 156px -> 608px
         val vivoKeyArea = KeyboardHeightPercentBase.computeGboardHeightPx(
             density = 3.0f,
             ydpi = 397.042f,
             percent = 27,
             landscape = false
         )
-        assertEquals(629, vivoKeyArea)
+        assertEquals(608, vivoKeyArea)
         assertTrue(xiaomiKeyArea > vivoKeyArea)
     }
 
@@ -57,7 +57,7 @@ class KeyboardHeightTest {
         val fromZero = KeyboardHeightPercentBase.computeGboardHeightPx(2.0f, 0f, 27, landscape = false)
         val fromNaN = KeyboardHeightPercentBase.computeGboardHeightPx(2.0f, Float.NaN, 27, landscape = false)
         val fromNominal = KeyboardHeightPercentBase.computeGboardHeightPx(2.0f, 320f, 27, landscape = false)
-        assertEquals(507, fromNominal)
+        assertEquals(493, fromNominal)
         assertEquals(fromNominal, fromZero)
         assertEquals(fromNominal, fromNaN)
     }

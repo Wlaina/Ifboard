@@ -178,6 +178,41 @@ abstract class BaseKeyboard(
         spaceSwipeMoveCursor.registerOnChangeListener(spaceSwipeChangeListener)
     }
 
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val specWidthPx = MeasureSpec.getSize(widthMeasureSpec)
+        val containerWidthPx = if (specWidthPx > 0) {
+            specWidthPx
+        } else {
+            resources.displayMetrics.widthPixels
+        }
+        val density = resources.displayMetrics.density
+        val landscape =
+            resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        val prefs = org.fcitx.fcitx5.android.data.theme.ThemeManager.prefs
+        val hMarginPrefDp =
+            (if (landscape) prefs.keyHorizontalMarginLandscape else prefs.keyHorizontalMargin).getValue().toFloat()
+        val vMarginPrefDp =
+            (if (landscape) prefs.keyVerticalMarginLandscape else prefs.keyVerticalMargin).getValue().toFloat()
+        val radiusPrefDp = prefs.keyRadius.getValue().toFloat()
+        val metrics = KeyboardLayoutMetrics.resolveKeyMetricsDp(
+            containerWidthDp = containerWidthPx / density,
+            landscape = landscape,
+            rowCount = keyRows.size,
+            prefHMarginDp = hMarginPrefDp,
+            prefVMarginDp = vMarginPrefDp,
+            prefRadiusDp = radiusPrefDp
+        )
+        val hMarginPx = Math.round(metrics.hMarginDp * density)
+        val vMarginPx = Math.round(metrics.vMarginDp * density)
+        val radiusPx = metrics.radiusDp * density
+        for (row in keyRows) {
+            for (i in 0 until row.childCount) {
+                (row.getChildAt(i) as? KeyView)?.applyLayoutMetrics(hMarginPx, vMarginPx, radiusPx)
+            }
+        }
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+    }
+
     private fun createKeyView(def: KeyDef): KeyView {
         return when (def.appearance) {
             is KeyDef.Appearance.AltText -> AltTextKeyView(context, theme, def.appearance)

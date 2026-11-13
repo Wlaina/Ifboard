@@ -75,6 +75,7 @@ import org.fcitx.fcitx5.android.input.keyboard.CustomGestureView
 import org.fcitx.fcitx5.android.input.keyboard.KeyAction
 import org.fcitx.fcitx5.android.input.keyboard.KeyActionListener
 import org.fcitx.fcitx5.android.input.keyboard.KeyDef
+import org.fcitx.fcitx5.android.input.keyboard.KeyboardLayoutMetrics
 import org.fcitx.fcitx5.android.input.keyboard.KeyboardWindow
 import org.fcitx.fcitx5.android.input.popup.PopupAction
 import org.fcitx.fcitx5.android.input.popup.PopupComponent
@@ -737,7 +738,11 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
 
     companion object {
         private const val VoiceRecheckMillis = 15_000L
-        const val HEIGHT = 40
+        const val HEIGHT = KeyboardLayoutMetrics.BAR_HEIGHT_LANDSCAPE_DP
+        const val HEIGHT_PORTRAIT = KeyboardLayoutMetrics.BAR_HEIGHT_PORTRAIT_DP
+        const val HEIGHT_LANDSCAPE = KeyboardLayoutMetrics.BAR_HEIGHT_LANDSCAPE_DP
+
+        fun heightDp(landscape: Boolean): Int = KeyboardLayoutMetrics.barHeightDp(landscape)
     }
 
     fun onKeyboardLayoutSwitched(isNumber: Boolean) {

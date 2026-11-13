@@ -21,6 +21,7 @@ import org.fcitx.fcitx5.android.data.prefs.ManagedPreference
 import org.fcitx.fcitx5.android.data.theme.Theme
 import org.fcitx.fcitx5.android.data.theme.ThemeManager
 import org.fcitx.fcitx5.android.data.theme.ThemePrefs.NavbarBackground
+import org.fcitx.fcitx5.android.input.keyboard.KeyboardLayoutMetrics
 import org.fcitx.fcitx5.android.input.keyboard.TextKeyboard
 import org.fcitx.fcitx5.android.utils.navbarFrameHeight
 import splitties.dimensions.dp
@@ -84,8 +85,31 @@ class KeyboardPreviewUi(override val ctx: Context, val theme: Theme) : Ui {
         scaleType = ImageView.ScaleType.CENTER_CROP
     }
 
-    private val barHeight = ctx.dp(40)
+    private fun currentPreviewLandscape(): Boolean =
+        ctx.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+
+    private val barHeight: Int
+        get() = ctx.dp(KeyboardLayoutMetrics.barHeightDp(currentPreviewLandscape()))
+
+    private fun currentTopPaddingPx(hostWidthPx: Int = keyboardWidth): Int {
+        if (currentPreviewLandscape()) return 0
+        val density = ctx.resources.displayMetrics.density
+        val effectiveW = if (hostWidthPx > 0) hostWidthPx else ctx.resources.displayMetrics.widthPixels
+        val containerWidthDp = (effectiveW - 2 * keyboardSidePaddingPx).coerceAtLeast(0) / density
+        val prefs = ThemeManager.prefs
+        val effective = KeyboardLayoutMetrics.resolveKeyMetricsDp(
+            containerWidthDp = containerWidthDp,
+            landscape = false,
+            rowCount = 4,
+            prefHMarginDp = prefs.keyHorizontalMargin.getValue().toFloat(),
+            prefVMarginDp = prefs.keyVerticalMargin.getValue().toFloat(),
+            prefRadiusDp = prefs.keyRadius.getValue().toFloat()
+        )
+        return Math.round(KeyboardLayoutMetrics.topPaddingDp(false, effective.vMarginDp) * density)
+    }
+
     private val fakeKawaiiBar = view(::View)
+    private val fakeTopPaddingSpace = view(::View)
 
     private var keyboardWidth = -1
     private var keyboardHeight = -1
@@ -95,7 +119,11 @@ class KeyboardPreviewUi(override val ctx: Context, val theme: Theme) : Ui {
         add(bkg, lParams {
             centerInParent()
         })
-        add(fakeKawaiiBar, lParams(height = dp(40)) {
+        add(fakeKawaiiBar, lParams(height = barHeight) {
+            centerHorizontally()
+        })
+        add(fakeTopPaddingSpace, lParams(height = currentTopPaddingPx()) {
+            below(fakeKawaiiBar)
             centerHorizontally()
         })
     }
@@ -143,13 +171,20 @@ class KeyboardPreviewUi(override val ctx: Context, val theme: Theme) : Ui {
         val (w, h) = keyboardWindowAspectRatio()
         keyboardWidth = w
         keyboardHeight = h
+        val topPadding = currentTopPaddingPx(w)
+        fakeKawaiiBar.updateLayoutParams<ConstraintLayout.LayoutParams> {
+            height = barHeight
+        }
+        fakeTopPaddingSpace.updateLayoutParams<ConstraintLayout.LayoutParams> {
+            height = topPadding
+        }
         fakeKeyboardWindow.updateLayoutParams<ConstraintLayout.LayoutParams> {
             height = keyboardHeight
             horizontalMargin = keyboardSidePaddingPx
         }
         intrinsicWidth = keyboardWidth
-        // KawaiiBar height + WindowManager view height
-        intrinsicHeight = barHeight + keyboardHeight
+        // KawaiiBar height + top breathing padding + WindowManager view height
+        intrinsicHeight = barHeight + topPadding + keyboardHeight
         // extra bottom padding
         intrinsicHeight += keyboardBottomPaddingPx
         // windowInsets navbar padding
@@ -186,7 +221,7 @@ class KeyboardPreviewUi(override val ctx: Context, val theme: Theme) : Ui {
         }
         fakeInputView.apply {
             add(fakeKeyboardWindow, lParams(matchConstraints, keyboardHeight) {
-                below(fakeKawaiiBar)
+                below(fakeTopPaddingSpace)
                 centerHorizontally(keyboardSidePaddingPx)
             })
         }

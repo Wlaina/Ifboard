@@ -10,6 +10,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
+import android.graphics.Color
 import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
@@ -142,7 +143,8 @@ class TranslatePanel(
     val root: View = LinearLayout(ctx).apply {
         orientation = LinearLayout.VERTICAL
         visibility = View.GONE
-        setBackgroundColor(theme.barColor)
+        // 直接透明复用 keyboardView 的模糊/纯色/自定义图片背景，避免与键盘背景产生透明度或色差
+        setBackgroundColor(Color.TRANSPARENT)
         setPadding(ctx.dpi(8), ctx.dpi(6), ctx.dpi(8), ctx.dpi(6))
         val langRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL

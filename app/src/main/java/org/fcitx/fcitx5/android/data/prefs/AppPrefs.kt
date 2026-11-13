@@ -40,6 +40,7 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
         val floatingY = int("floating_y", -1)
         val floatingXLandscape = int("floating_x_landscape", -1)
         val floatingYLandscape = int("floating_y_landscape", -1)
+        val layoutMetricsVersion = int("layout_metrics_version", 0)
     }
 
     inner class Advanced : ManagedPreferenceCategory(R.string.advanced, sharedPreferences) {

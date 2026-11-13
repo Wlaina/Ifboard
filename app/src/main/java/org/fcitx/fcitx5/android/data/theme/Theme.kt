@@ -317,7 +317,8 @@ sealed class Theme : Parcelable {
             accentKeyBackgroundColor = secondaryContainer,
             accentKeyTextColor = onSecondaryContainer,
             keyPressHighlightColor = onSurface.alpha(if (isDark) 0.2f else 0.12f),
-            keyShadowColor = 0x000000,
+            // 浅色 Monet 对齐 Gboard 1dp 柔和底影，深色保持纯平无阴影
+            keyShadowColor = if (isDark) 0x00000000 else 0x16000000,
             popupBackgroundColor = surfaceBright,
             popupTextColor = onSurface,
             spaceBarColor = surfaceBright,

@@ -86,7 +86,7 @@ object SettingNotes {
         "key_horizontal_margin_landscape" to "横屏时按键之间的左右间距",
         "key_vertical_margin" to "按键之间的上下间距（竖屏）",
         "key_vertical_margin_landscape" to "横屏时按键之间的上下间距",
-        "key_radius" to "按键圆角大小。6dp 与 Gboard 一致",
+        "key_radius" to "按键圆角大小。默认 7dp 与宽屏 Gboard 一致（360dp 等窄屏自动收窄至 6dp）",
         "text_editing_button_radius" to "「文本编辑」面板里按钮的圆角",
         "clipboard_entry_radius" to "剪贴板条目的圆角",
         "punctuation_position" to "字母键上的小符号显示在哪里。「右上」与 Gboard 一致（只显示数字）",

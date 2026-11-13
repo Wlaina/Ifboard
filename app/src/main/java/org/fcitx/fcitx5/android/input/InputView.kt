@@ -50,6 +50,7 @@ import org.fcitx.fcitx5.android.input.broadcast.ReturnKeyDrawableComponent
 import org.fcitx.fcitx5.android.input.candidates.horizontal.HorizontalCandidateComponent
 import org.fcitx.fcitx5.android.input.keyboard.CommonKeyActionListener
 import org.fcitx.fcitx5.android.input.keyboard.KeyView
+import org.fcitx.fcitx5.android.input.keyboard.KeyboardLayoutMetrics
 import org.fcitx.fcitx5.android.input.keyboard.KeyboardWindow
 import org.fcitx.fcitx5.android.input.picker.emojiPicker
 import org.fcitx.fcitx5.android.input.picker.emoticonPicker
@@ -111,6 +112,9 @@ class InputView(
     private val placeholderOnClickListener = OnClickListener { }
 
     // use clickable view as padding, so MotionEvent can be split to padding view and keyboard view
+    private val topPaddingSpace = view(::View) {
+        setOnClickListener(placeholderOnClickListener)
+    }
     private val leftPaddingSpace = view(::View) {
         setOnClickListener(placeholderOnClickListener)
     }
@@ -140,7 +144,6 @@ class InputView(
         val cornerDp = if (isFloating) FLOATING_CORNER_DP else 0f
         if (Glass.applyBackgroundBlur(keyboardView, theme.backgroundColor, cornerRadiusDp = cornerDp, host = this)) {
             customBackground.alpha = 0f
-            translatePanel.root.setBackgroundColor(Glass.tint(theme.barColor, 0.45f))
         }
         applyFloatingChrome()
         service.updateFloatingWindowState()
@@ -241,7 +244,7 @@ class InputView(
             return if (isLandscape) {
                 (parentW * 0.48f).toInt().coerceIn(minOf(dp(280), parentW), maxOf(minOf(dp(280), parentW), dp(380)))
             } else {
-                (parentW * 0.80f).toInt().coerceIn(minOf(dp(260), parentW), maxOf(minOf(dp(260), parentW), dp(336)))
+                (parentW * 0.85f).toInt().coerceIn(minOf(dp(280), parentW), maxOf(minOf(dp(280), parentW), dp(344)))
             }
         }
 
@@ -343,27 +346,31 @@ class InputView(
                 topOfParent()
                 centerHorizontally()
             })
-            add(kawaiiBar.view, lParams(matchParent, dp(KawaiiBarComponent.HEIGHT)) {
+            add(kawaiiBar.view, lParams(matchParent, currentBarHeightPx()) {
                 below(translatePanel.root)
                 centerHorizontally()
             })
             // Ifboard inline voice bar overlays the toolbar, keys stay usable
-            add(voiceBar.root, lParams(matchParent, dp(KawaiiBarComponent.HEIGHT)) {
+            add(voiceBar.root, lParams(matchParent, currentBarHeightPx()) {
                 topToTopOf(kawaiiBar.view)
                 centerHorizontally()
             })
-            add(leftPaddingSpace, lParams {
+            add(topPaddingSpace, lParams(matchParent, currentTopPaddingPx()) {
                 below(kawaiiBar.view)
+                centerHorizontally()
+            })
+            add(leftPaddingSpace, lParams {
+                below(topPaddingSpace)
                 startOfParent()
                 bottomOfParent()
             })
             add(rightPaddingSpace, lParams {
-                below(kawaiiBar.view)
+                below(topPaddingSpace)
                 endOfParent()
                 bottomOfParent()
             })
             add(windowManager.view, lParams {
-                below(kawaiiBar.view)
+                below(topPaddingSpace)
                 above(bottomPaddingSpace)
                 /**
                  * set start and end constrain in [updateKeyboardSize]
@@ -471,10 +478,59 @@ class InputView(
         }
     }
 
+    private fun currentSidePaddingPx(floating: Boolean = isFloating): Int =
+        if (floating) {
+            KeyboardLayoutMetrics.computeFloatingSidePaddingPx(keyboardSidePaddingPx, dp(5), dp(7))
+        } else {
+            keyboardSidePaddingPx
+        }
+
+    private fun currentBarHeightPx(): Int =
+        dp(KeyboardLayoutMetrics.barHeightDp(isLandscape))
+
+    private fun currentTopPaddingPx(floating: Boolean = isFloating): Int {
+        if (isLandscape) return 0
+        val sidePadding = currentSidePaddingPx(floating)
+        val hostWidthPx = if (floating) floatingWidthPx else availableWidthPx
+        val density = resources.displayMetrics.density
+        val containerWidthDp = (hostWidthPx - 2 * sidePadding).coerceAtLeast(0) / density
+        val prefs = org.fcitx.fcitx5.android.data.theme.ThemeManager.prefs
+        val effectiveMetrics = KeyboardLayoutMetrics.resolveKeyMetricsDp(
+            containerWidthDp = containerWidthDp,
+            landscape = false,
+            rowCount = 4,
+            prefHMarginDp = prefs.keyHorizontalMargin.getValue().toFloat(),
+            prefVMarginDp = prefs.keyVerticalMargin.getValue().toFloat(),
+            prefRadiusDp = prefs.keyRadius.getValue().toFloat()
+        )
+        val topDp = KeyboardLayoutMetrics.topPaddingDp(false, effectiveMetrics.vMarginDp)
+        return Math.round(topDp * density)
+    }
+
     private fun updateKeyboardSize() {
         applyBottomInsetMode()
         val floating = isFloating
-        val sidePadding = if (floating) keyboardSidePaddingPx.coerceIn(dp(4), dp(6)) else keyboardSidePaddingPx
+        val sidePadding = currentSidePaddingPx(floating)
+        val barHeightPx = currentBarHeightPx()
+        kawaiiBar.view.layoutParams?.let { lp ->
+            if (lp.height != barHeightPx) {
+                lp.height = barHeightPx
+                kawaiiBar.view.layoutParams = lp
+            }
+        }
+        voiceBar.root.layoutParams?.let { lp ->
+            if (lp.height != barHeightPx) {
+                lp.height = barHeightPx
+                voiceBar.root.layoutParams = lp
+            }
+        }
+        val topPaddingPx = currentTopPaddingPx(floating)
+        topPaddingSpace.layoutParams?.let { lp ->
+            if (lp.height != topPaddingPx) {
+                lp.height = topPaddingPx
+                topPaddingSpace.layoutParams = lp
+            }
+        }
         if (sidePadding == 0) {
             // hide side padding space views when unnecessary
             leftPaddingSpace.visibility = GONE
@@ -662,7 +718,7 @@ class InputView(
         if (keyboardView.height > 0 && keyboardView.width == cardW) {
             keyboardView.height
         } else {
-            floatingKeyboardHeightPx + dp(KawaiiBarComponent.HEIGHT) + dp(FLOATING_HANDLE_HEIGHT_DP)
+            floatingKeyboardHeightPx + currentBarHeightPx() + currentTopPaddingPx(floating = true) + dp(FLOATING_HANDLE_HEIGHT_DP)
         }
 
     private fun clampFloatingPosition(x: Int, y: Int, cardW: Int = floatingWidthPx): Pair<Int, Int> {

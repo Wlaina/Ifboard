@@ -57,9 +57,14 @@ abstract class KeyView(ctx: Context, val theme: Theme, val def: KeyDef.Appearanc
     val bordered: Boolean
     val borderStroke: Boolean
     val rippled: Boolean
-    val radius: Float
-    val hMargin: Int
-    val vMargin: Int
+    var radius: Float
+        private set
+    var hMargin: Int
+        private set
+    var vMargin: Int
+        private set
+    private val isPill: Boolean
+    private val hasExplicitMarginOverride: Boolean
 
     init {
         val prefs = ThemeManager.prefs
@@ -67,7 +72,7 @@ abstract class KeyView(ctx: Context, val theme: Theme, val def: KeyDef.Appearanc
         borderStroke = prefs.keyBorderStroke.getValue()
         rippled = prefs.keyRippleEffect.getValue()
         // Gboard style: return / layout switch keys are pill shaped (GradientDrawable clamps radius to half height)
-        val isPill = def.viewId == R.id.button_return ||
+        isPill = def.viewId == R.id.button_return ||
                 (def is KeyDef.Appearance.Text && def.displayText in setOf("?123", "ABC", "返回"))
         radius = if (isPill) dp(100f) else dp(prefs.keyRadius.getValue().toFloat())
         val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -76,6 +81,7 @@ abstract class KeyView(ctx: Context, val theme: Theme, val def: KeyDef.Appearanc
         val vMarginPref =
             if (landscape) prefs.keyVerticalMarginLandscape else prefs.keyVerticalMargin
         val override = KeyMarginOverride.dp
+        hasExplicitMarginOverride = override != null
         hMargin = if (!def.margin) 0 else if (override != null) dp(override).toInt() else dp(hMarginPref.getValue())
         vMargin = if (!def.margin) 0 else if (override != null) dp(override).toInt() else dp(vMarginPref.getValue())
     }
@@ -121,6 +127,11 @@ abstract class KeyView(ctx: Context, val theme: Theme, val def: KeyDef.Appearanc
         if (def.viewId > 0) {
             id = def.viewId
         }
+        applyBackgroundAndHighlight()
+        add(appearanceView, lParams(matchParent, matchParent))
+    }
+
+    private fun applyBackgroundAndHighlight() {
         // key border
         if ((bordered && def.border != Border.Off) || def.border == Border.On) {
             val bkgColor = when (def.variant) {
@@ -146,8 +157,21 @@ abstract class KeyView(ctx: Context, val theme: Theme, val def: KeyDef.Appearanc
                 setupPressHighlight()
             }
         }
-        add(appearanceView, lParams(matchParent, matchParent))
     }
+
+    fun applyLayoutMetrics(hMarginPx: Int, vMarginPx: Int, radiusPx: Float) {
+        val targetH = if (!def.margin) 0 else if (hasExplicitMarginOverride) hMargin else hMarginPx
+        val targetV = if (!def.margin) 0 else if (hasExplicitMarginOverride) vMargin else vMarginPx
+        val targetR = if (isPill) dp(100f) else radiusPx
+        if (targetH == hMargin && targetV == vMargin && targetR == radius) return
+        hMargin = targetH
+        vMargin = targetV
+        radius = targetR
+        applyBackgroundAndHighlight()
+        onMarginsUpdated()
+    }
+
+    protected open fun onMarginsUpdated() {}
 
     private fun setupPressHighlight(mask: Drawable? = null) {
         appearanceView.foreground = if (rippled) {
@@ -409,6 +433,10 @@ class AltTextKeyView(ctx: Context, theme: Theme, def: KeyDef.Appearance.AltText)
         }
     }
 
+    override fun onMarginsUpdated() {
+        applyLayout(resources.configuration.orientation)
+    }
+
     override fun onConfigurationChanged(newConfig: Configuration) {
         if (ThemeManager.prefs.punctuationPosition.getValue() == PunctuationPosition.TopRight) {
             return
@@ -495,6 +523,10 @@ class ImageTextKeyView(ctx: Context, theme: Theme, def: KeyDef.Appearance.ImageT
                 }
             }
         }
+    }
+
+    override fun onMarginsUpdated() {
+        updateMargins(resources.configuration.orientation)
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {

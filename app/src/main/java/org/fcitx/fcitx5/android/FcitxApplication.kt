@@ -138,6 +138,13 @@ class FcitxApplication : Application() {
         org.fcitx.fcitx5.android.ifboard.BackgroundStart.register(this)
         ClipboardManager.init(ctx)
         ThemeManager.init(resources.configuration)
+        if (!isDirectBootMode) {
+            org.fcitx.fcitx5.android.input.keyboard.KeyboardLayoutMetrics.migrateLegacyDefaultsIfNeeded(
+                AppPrefs.getInstance(),
+                ThemeManager.prefs,
+                sharedPrefs
+            )
+        }
         Locales.onLocaleChange(resources.configuration)
         registerReceiver(shutdownReceiver, IntentFilter(Intent.ACTION_SHUTDOWN))
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && !isDirectBootMode) {
