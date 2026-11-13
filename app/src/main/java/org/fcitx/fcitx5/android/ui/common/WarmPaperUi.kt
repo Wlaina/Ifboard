@@ -22,6 +22,9 @@ import android.view.Window
 import android.widget.CompoundButton
 import android.widget.ImageButton
 import android.widget.TextView
+import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.widget.Toolbar
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -125,6 +128,17 @@ object WarmPaperUi {
     fun dpf(context: Context, value: Float): Float =
         value * context.resources.displayMetrics.density
 
+    /** 启用真正全透明系统栏的 Edge-to-Edge（避免默认 auto 样式在 API 29+/35+ 开启对比度遮罩） */
+    fun enableEdgeToEdge(activity: ComponentActivity, dark: Boolean = isDark(activity)) {
+        val style = if (dark) {
+            SystemBarStyle.dark(Color.TRANSPARENT)
+        } else {
+            SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
+        }
+        activity.enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
+        applySystemBars(activity)
+    }
+
     /** 配置边缘到边缘状态栏与导航栏对比度 */
     fun applySystemBars(activity: Activity) {
         val dark = isDark(activity)
@@ -135,7 +149,12 @@ object WarmPaperUi {
             window.statusBarColor = Color.TRANSPARENT
             window.navigationBarColor = Color.TRANSPARENT
         }
-        WindowCompat.getInsetsController(window, window.decorView)?.apply {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isNavigationBarContrastEnforced = false
+            @Suppress("DEPRECATION")
+            window.isStatusBarContrastEnforced = false
+        }
+        WindowCompat.getInsetsController(window, window.decorView).apply {
             isAppearanceLightStatusBars = !dark
             isAppearanceLightNavigationBars = !dark
         }

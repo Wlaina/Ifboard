@@ -35,6 +35,7 @@ import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.ui.main.modified.MyPreferenceFragment
 import splitties.views.bottomPadding
 import splitties.views.topPadding
+import kotlin.math.max
 
 abstract class PaddingPreferenceFragment : MyPreferenceFragment() {
 
@@ -56,7 +57,8 @@ abstract class PaddingPreferenceFragment : MyPreferenceFragment() {
         val baseBottom = WarmPaperUi.dp(rv.context, 20f)
         ViewCompat.setOnApplyWindowInsetsListener(rv) { _, windowInsets ->
             val nav = windowInsets.getInsets(WindowInsetsCompat.Type.navigationBars())
-            val wantBottom = nav.bottom + baseBottom
+            val mandatory = windowInsets.getInsets(WindowInsetsCompat.Type.mandatorySystemGestures())
+            val wantBottom = max(nav.bottom, mandatory.bottom) + baseBottom
             if (rv.paddingBottom != wantBottom) rv.bottomPadding = wantBottom
             windowInsets
         }

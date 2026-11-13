@@ -14,6 +14,7 @@ import org.fcitx.fcitx5.android.input.wm.InputWindow
 import org.fcitx.fcitx5.android.utils.clipboardManager
 import org.fcitx.fcitx5.android.utils.toast
 import splitties.dimensions.dp
+import splitties.views.bottomPadding
 import splitties.views.dsl.core.add
 import splitties.views.dsl.core.horizontalLayout
 import splitties.views.dsl.core.lParams
@@ -57,6 +58,13 @@ class EditorInfoWindow : InputWindow.ExtendedInputWindow<EditorInfoWindow>() {
         context.horizontalLayout {
             add(copyButton, lParams(dp(40), dp(40)))
         }
+    }
+
+    override val extendBehindNavBar = true
+
+    override fun onBottomInsetChanged(bottomInset: Int) {
+        ui.root.clipToPadding = false
+        ui.root.bottomPadding = bottomInset
     }
 
     override fun onCreateView() = ui.root

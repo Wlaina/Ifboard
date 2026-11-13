@@ -6,6 +6,7 @@ package org.fcitx.fcitx5.android.data.clipboard.db
 
 import android.content.ClipData
 import android.content.ClipDescription
+import android.content.Context
 import android.os.Build
 import androidx.room.ColumnInfo
 import androidx.room.Entity
@@ -40,12 +41,19 @@ data class ClipboardEntry(
 
         fun fromClipData(
             clipData: ClipData,
-            transformer: ((String) -> String)? = null
+            transformer: ((String) -> String)? = null,
+            context: Context? = null
         ): ClipboardEntry? {
+            if (clipData.itemCount <= 0) return null
             val desc = clipData.description
+            val hasImage = (0 until desc.mimeTypeCount).any {
+                desc.getMimeType(it).startsWith("image/")
+            }
             // TODO: handle multiple items (when does this happen?)
             val item = clipData.getItemAt(0) ?: return null
-            val str = item.text?.toString() ?: return null
+            val str = item.text?.toString()
+                ?: (if (!hasImage && context != null) item.coerceToText(context)?.toString() else null)
+                ?: return null
             val sensitive = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 desc.extras?.getBoolean(IS_SENSITIVE) ?: false
             } else {
@@ -54,9 +62,22 @@ data class ClipboardEntry(
             return ClipboardEntry(
                 text = if (transformer != null) transformer(str) else str,
                 timestamp = clipData.timestamp(),
-                type = desc.getMimeType(0),
+                type = if (desc.mimeTypeCount > 0) desc.getMimeType(0) else ClipDescription.MIMETYPE_TEXT_PLAIN,
                 sensitive = sensitive
             )
+        }
+
+        /** 根据时间戳（及同时间戳下的 id）筛选超出上限的过期未置顶条目 id。 */
+        internal fun selectOutdatedIds(unpinned: List<ClipboardEntry>, limit: Int): IntArray {
+            if (unpinned.size <= limit) return intArrayOf()
+            if (limit <= 0) {
+                return unpinned.map { it.id }.toIntArray()
+            }
+            return unpinned
+                .sortedWith(compareByDescending<ClipboardEntry> { it.timestamp }.thenByDescending { it.id })
+                .drop(limit)
+                .map { it.id }
+                .toIntArray()
         }
     }
 }

@@ -77,7 +77,7 @@ class ThemePrefs(sharedPreferences: SharedPreferences) :
             R.string.key_vertical_margin,
             R.string.portrait,
             "key_vertical_margin",
-            7,
+            5,
             R.string.landscape,
             "key_vertical_margin_landscape",
             4,

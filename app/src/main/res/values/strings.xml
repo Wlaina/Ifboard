@@ -328,5 +328,9 @@
     <string name="gb_auto_capitalize">English auto-capitalization</string>
     <string name="gb_double_space_period">Double-space period (English)</string>
     <string name="ifb_glass_effect">Liquid glass</string>
-    <string name="ifb_glass_effect_summary">Blur what is behind the keyboard and the long-press popups</string>
+    <string name="ifb_glass_effect_summary">Translucent Gaussian blur background requires Android 12+ with system cross-window blur enabled; unsupported ROMs keep an opaque backdrop with frosted popups</string>
+    <string name="clear_all_images">Clear all images</string>
+    <string name="floating_keyboard">Floating</string>
+    <string name="floating_keyboard_summary">Detach into a draggable rounded floating window (shows Gaussian blur liquid glass only when supported by the system)</string>
+    <string name="dock_keyboard">Dock keyboard</string>
 </resources>

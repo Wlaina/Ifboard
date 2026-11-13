@@ -7,6 +7,7 @@ package org.fcitx.fcitx5.android.ui.common
 import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.content.Context
+import android.graphics.Color
 import android.view.View
 import android.view.ViewGroup
 import android.widget.CheckBox
@@ -52,6 +53,7 @@ import splitties.views.dsl.recyclerview.recyclerView
 import splitties.views.gravityEndBottom
 import splitties.views.imageDrawable
 import splitties.views.recyclerview.verticalLayoutManager
+import kotlin.math.max
 import kotlin.math.min
 
 abstract class BaseDynamicListUi<T>(
@@ -288,14 +290,16 @@ abstract class BaseDynamicListUi<T>(
     private fun updateViewMargin(insets: WindowInsetsCompat? = null) {
         val windowInsets = (insets ?: ViewCompat.getRootWindowInsets(root)) ?: return
         val navBars = windowInsets.getInsets(WindowInsetsCompat.Type.navigationBars())
+        val mandatory = windowInsets.getInsets(WindowInsetsCompat.Type.mandatorySystemGestures())
+        val navBottom = max(navBars.bottom, mandatory.bottom)
         fab.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-            bottomMargin = navBars.bottom + ctx.dp(16)
+            bottomMargin = navBottom + ctx.dp(16)
         }
-        recyclerView.bottomPadding = navBars.bottom
+        recyclerView.bottomPadding = navBottom
     }
 
     override val root = coordinatorLayout {
-        backgroundColor = styledColorCompat(android.R.attr.colorBackground)
+        backgroundColor = Color.TRANSPARENT
         add(recyclerView, defaultLParams {
             height = matchParent
             width = matchParent

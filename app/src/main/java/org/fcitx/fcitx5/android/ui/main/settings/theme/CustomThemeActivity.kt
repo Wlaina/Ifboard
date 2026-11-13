@@ -22,7 +22,6 @@ import android.view.ViewGroup
 import android.webkit.MimeTypeMap
 import android.widget.SeekBar
 import androidx.activity.addCallback
-import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContract
 import androidx.annotation.StringRes
@@ -39,7 +38,9 @@ import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.data.theme.Theme
 import org.fcitx.fcitx5.android.data.theme.ThemeFilesManager
 import org.fcitx.fcitx5.android.data.theme.ThemePreset
+import org.fcitx.fcitx5.android.ui.common.WarmPaperUi
 import org.fcitx.fcitx5.android.ui.common.withLoadingDialog
+import kotlin.math.max
 import org.fcitx.fcitx5.android.ui.main.CropImageActivity.CropContract
 import org.fcitx.fcitx5.android.ui.main.CropImageActivity.CropOption
 import org.fcitx.fcitx5.android.ui.main.CropImageActivity.CropResult
@@ -193,6 +194,7 @@ class CustomThemeActivity : AppCompatActivity() {
             })
         }.wrapInScrollView {
             isFillViewport = true
+            clipToPadding = false
         }
     }
 
@@ -284,16 +286,13 @@ class CustomThemeActivity : AppCompatActivity() {
             variantSwitch.visibility = View.GONE
             brightnessSeekBar.visibility = View.GONE
         }
-        enableEdgeToEdge()
+        WarmPaperUi.enableEdgeToEdge(this)
         ViewCompat.setOnApplyWindowInsetsListener(ui) { _, windowInsets ->
             val statusBars = windowInsets.getInsets(WindowInsetsCompat.Type.statusBars())
             val navBars = windowInsets.getInsets(WindowInsetsCompat.Type.navigationBars())
-            ui.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                leftMargin = navBars.left
-                rightMargin = navBars.right
-            }
-            toolbar.topPadding = statusBars.top
-            scrollView.bottomPadding = navBars.bottom
+            val mandatory = windowInsets.getInsets(WindowInsetsCompat.Type.mandatorySystemGestures())
+            toolbar.setPadding(navBars.left, statusBars.top, navBars.right, 0)
+            scrollView.setPadding(navBars.left, 0, navBars.right, max(navBars.bottom, mandatory.bottom))
             windowInsets
         }
         // show Activity label on toolbar

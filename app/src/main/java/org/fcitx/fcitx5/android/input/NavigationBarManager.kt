@@ -10,6 +10,7 @@ import android.os.Build
 import android.view.Window
 import androidx.annotation.ColorInt
 import androidx.core.view.WindowCompat
+import org.fcitx.fcitx5.android.data.prefs.AppPrefs
 import org.fcitx.fcitx5.android.data.theme.Theme
 import org.fcitx.fcitx5.android.data.theme.ThemeManager
 import org.fcitx.fcitx5.android.data.theme.ThemePrefs.NavbarBackground
@@ -19,6 +20,7 @@ class NavigationBarManager {
 
     private val keyBorder by ThemeManager.prefs.keyBorder
     private val navbarBackground by ThemeManager.prefs.navbarBackground
+    private val floatingKeyboard by AppPrefs.getInstance().keyboard.floatingKeyboard
 
     private var shouldUpdateNavbarForeground = false
     private var shouldUpdateNavbarBackground = false
@@ -76,7 +78,14 @@ class NavigationBarManager {
     }
 
     fun evaluate(window: Window, isVirtualKeyboard: Boolean) {
-        if (isVirtualKeyboard) {
+        if (isVirtualKeyboard && floatingKeyboard) {
+            // Floating keyboard does not dock against the navbar: keep it completely transparent
+            shouldUpdateNavbarForeground = false
+            shouldUpdateNavbarBackground = false
+            window.useSystemNavbarBackground(false)
+            window.setNavbarBackgroundColor(Color.TRANSPARENT)
+            window.enforceNavbarContrast(false)
+        } else if (isVirtualKeyboard) {
             evaluateWithVirtualKeyboard(window)
         } else {
             // always color navbar to avoid CandidatesView being drawn behind it

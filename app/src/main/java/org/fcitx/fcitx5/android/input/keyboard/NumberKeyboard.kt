@@ -121,7 +121,6 @@ class NumberKeyboard(
                 gravity = android.view.Gravity.CENTER
                 setTextColor(theme.altKeyTextColor)
                 GboardFont.get(context)?.let { typeface = it }
-                paint.applyKeycapStroke(context.resources.displayMetrics.density, 0.28f)
                 background = android.graphics.drawable.RippleDrawable(
                     android.content.res.ColorStateList.valueOf(theme.keyPressHighlightColor), null, null
                 )

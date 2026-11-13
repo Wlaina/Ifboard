@@ -12,7 +12,6 @@ import android.os.Bundle
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
-import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -58,19 +57,18 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
-        WarmPaperUi.applySystemBars(this)
+        WarmPaperUi.enableEdgeToEdge(this)
         val binding = ActivityMainBinding.inflate(layoutInflater)
         monetBg = binding.monetBg
         toolbarView = binding.toolbar
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, windowInsets ->
             val statusBars = windowInsets.getInsets(WindowInsetsCompat.Type.statusBars())
             val navBars = windowInsets.getInsets(WindowInsetsCompat.Type.navigationBars())
-            binding.root.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+            binding.navHostFragment.updateLayoutParams<ViewGroup.MarginLayoutParams> {
                 leftMargin = navBars.left
                 rightMargin = navBars.right
             }
-            binding.toolbar.topPadding = statusBars.top
+            binding.toolbar.setPadding(navBars.left, statusBars.top, navBars.right, 0)
             windowInsets
         }
         setContentView(binding.root)

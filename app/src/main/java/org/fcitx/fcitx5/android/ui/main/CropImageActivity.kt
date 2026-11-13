@@ -16,7 +16,6 @@ import android.os.Parcelable
 import android.view.Menu
 import android.view.ViewGroup
 import androidx.activity.addCallback
-import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContract
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -31,7 +30,9 @@ import com.canhub.cropper.CropImageView
 import kotlinx.parcelize.IgnoredOnParcel
 import kotlinx.parcelize.Parcelize
 import org.fcitx.fcitx5.android.R
+import org.fcitx.fcitx5.android.ui.common.WarmPaperUi
 import org.fcitx.fcitx5.android.utils.item
+import kotlin.math.max
 import org.fcitx.fcitx5.android.utils.parcelable
 import org.fcitx.fcitx5.android.utils.subMenu
 import org.fcitx.fcitx5.android.utils.toast
@@ -136,7 +137,7 @@ class CropImageActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         cropOption = intent.parcelable<CropOption>(CROP_OPTIONS) ?: CropOption.New(1, 1)
-        enableEdgeToEdge()
+        WarmPaperUi.enableEdgeToEdge(this)
         setupRootView()
         setContentView(root)
         setupCropView(cropOption)
@@ -171,12 +172,13 @@ class CropImageActivity : AppCompatActivity() {
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, windowInsets ->
             val statusBars = windowInsets.getInsets(WindowInsetsCompat.Type.statusBars())
             val navBars = windowInsets.getInsets(WindowInsetsCompat.Type.navigationBars())
-            root.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+            val mandatory = windowInsets.getInsets(WindowInsetsCompat.Type.mandatorySystemGestures())
+            toolbar.setPadding(navBars.left, statusBars.top, navBars.right, 0)
+            cropView.updateLayoutParams<ViewGroup.MarginLayoutParams> {
                 leftMargin = navBars.left
                 rightMargin = navBars.right
-                bottomMargin = navBars.bottom
+                bottomMargin = max(navBars.bottom, mandatory.bottom)
             }
-            toolbar.topPadding = statusBars.top
             windowInsets
         }
     }

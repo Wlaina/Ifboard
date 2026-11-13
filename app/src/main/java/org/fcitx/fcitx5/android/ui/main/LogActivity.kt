@@ -7,7 +7,6 @@ package org.fcitx.fcitx5.android.ui.main
 import android.os.Bundle
 import android.view.Menu
 import android.view.ViewGroup
-import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts.CreateDocument
 import androidx.appcompat.app.AlertDialog
@@ -22,6 +21,7 @@ import kotlinx.coroutines.withContext
 import org.fcitx.fcitx5.android.FcitxApplication
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.databinding.ActivityLogBinding
+import org.fcitx.fcitx5.android.ui.common.WarmPaperUi
 import org.fcitx.fcitx5.android.ui.main.log.LogView
 import org.fcitx.fcitx5.android.utils.DeviceInfo
 import org.fcitx.fcitx5.android.utils.Logcat
@@ -30,6 +30,7 @@ import org.fcitx.fcitx5.android.utils.item
 import org.fcitx.fcitx5.android.utils.toast
 import org.fcitx.fcitx5.android.utils.styledColorCompat
 import splitties.views.topPadding
+import kotlin.math.max
 
 class LogActivity : AppCompatActivity() {
 
@@ -58,17 +59,18 @@ class LogActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        WarmPaperUi.enableEdgeToEdge(this)
         val binding = ActivityLogBinding.inflate(layoutInflater)
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, windowInsets ->
             val statusBars = windowInsets.getInsets(WindowInsetsCompat.Type.statusBars())
             val navBars = windowInsets.getInsets(WindowInsetsCompat.Type.navigationBars())
-            binding.root.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+            val mandatory = windowInsets.getInsets(WindowInsetsCompat.Type.mandatorySystemGestures())
+            binding.toolbar.setPadding(navBars.left, statusBars.top, navBars.right, 0)
+            binding.logView.updateLayoutParams<ViewGroup.MarginLayoutParams> {
                 leftMargin = navBars.left
                 rightMargin = navBars.right
             }
-            binding.toolbar.topPadding = statusBars.top
-            binding.logView.setBottomPadding(navBars.bottom)
+            binding.logView.setBottomPadding(max(navBars.bottom, mandatory.bottom))
             windowInsets
         }
         setContentView(binding.root)

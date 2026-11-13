@@ -72,7 +72,7 @@ abstract class ClipboardAdapter(
                     val end = min(excerptEnd, lineBreak)
                     // append one line exactly
                     if (mask) {
-                        append(ClipboardEntry.BULLET.repeat(end - start))
+                        appendLine(ClipboardEntry.BULLET.repeat(end - start))
                     } else {
                         appendLine(str.substring(start, end))
                     }

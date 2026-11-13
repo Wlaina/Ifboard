@@ -9,7 +9,6 @@ import android.content.Context
 import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Color
-import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
@@ -188,6 +187,10 @@ abstract class KeyView(ctx: Context, val theme: Theme, val def: KeyDef.Appearanc
         appearanceView.alpha = if (enabled) 1f else styledFloat(android.R.attr.disabledAlpha)
     }
 
+    fun invalidateBounds() {
+        boundsValid = false
+    }
+
     fun updateBounds() {
         val (x, y) = cachedLocation.also { appearanceView.getLocationInWindow(it) }
         cachedBounds.set(x, y, x + appearanceView.width, y + appearanceView.height)
@@ -253,13 +256,6 @@ abstract class KeyView(ctx: Context, val theme: Theme, val def: KeyDef.Appearanc
     }
 }
 
-internal fun Paint.applyKeycapStroke(density: Float, weightDp: Float = 0.28f) {
-    style = Paint.Style.FILL_AND_STROKE
-    strokeJoin = Paint.Join.ROUND
-    strokeCap = Paint.Cap.ROUND
-    strokeWidth = density * weightDp
-}
-
 @SuppressLint("ViewConstructor")
 open class TextKeyView(ctx: Context, theme: Theme, def: KeyDef.Appearance.Text) :
     KeyView(ctx, theme, def) {
@@ -270,9 +266,8 @@ open class TextKeyView(ctx: Context, theme: Theme, def: KeyDef.Appearance.Text) 
         text = def.displayText
         setTextSize(TypedValue.COMPLEX_UNIT_DIP, def.textSize)
         textDirection = View.TEXT_DIRECTION_FIRST_STRONG_LTR
-        // Gboard style: Google Sans with subtle stroke weight matching Gboard's optical medium
+        // 使用 Google Sans 常规字重绘制；Paint.Style.FILL_AND_STROKE 会导致部分自相交字形（如大写 Q 与数字 4）内部被填实
         setTypeface(GboardFont.get(context) ?: typeface, def.textStyle)
-        paint.applyKeycapStroke(context.resources.displayMetrics.density, if (def.textSize <= 14f) 0.15f else 0.28f)
         setTextColor(
             when (def.variant) {
                 Variant.Normal -> theme.keyTextColor
@@ -325,7 +320,6 @@ class AltTextKeyView(ctx: Context, theme: Theme, def: KeyDef.Appearance.AltText)
         // Gboard style hint: crisp numeric hint weight
         setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12.5f)
         setTypeface(GboardFont.get(context) ?: typeface, Typeface.NORMAL)
-        paint.applyKeycapStroke(context.resources.displayMetrics.density, 0.20f)
         text = def.altText
         textDirection = View.TEXT_DIRECTION_FIRST_STRONG_LTR
         setTextColor(

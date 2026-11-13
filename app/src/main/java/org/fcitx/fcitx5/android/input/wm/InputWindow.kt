@@ -40,6 +40,16 @@ sealed class InputWindow : Dependent {
     open fun animateEnter(lastWindow: InputWindow): Boolean = true
 
     /**
+     * Whether this window extends edge-to-edge behind the bottom navigation/padding band.
+     */
+    open val extendBehindNavBar: Boolean = false
+
+    /**
+     * Called when the bottom inset (keyboard bottom padding + navigation bar inset) updates.
+     */
+    open fun onBottomInsetChanged(bottomInset: Int) {}
+
+    /**
      * After the window was set up in dynamic scope
      */
     abstract fun onCreateView(): View

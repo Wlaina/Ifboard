@@ -58,6 +58,7 @@ import org.fcitx.fcitx5.android.core.SubtypeManager
 import org.fcitx.fcitx5.android.daemon.FcitxConnection
 import org.fcitx.fcitx5.android.daemon.FcitxDaemon
 import org.fcitx.fcitx5.android.data.InputFeedbacks
+import org.fcitx.fcitx5.android.data.clipboard.ClipboardManager
 import org.fcitx.fcitx5.android.data.prefs.AppPrefs
 import org.fcitx.fcitx5.android.data.prefs.ManagedPreference
 import org.fcitx.fcitx5.android.data.prefs.ManagedPreferenceProvider
@@ -106,15 +107,29 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         postFcitxJob {
             setCandidatePagingMode(if (isVirtualKeyboard) 0 else 1)
         }
-        currentInputConnection?.monitorCursorAnchor(!isVirtualKeyboard)
         if (isVirtualKeyboard) {
+            currentInputConnection?.monitorCursorAnchor(enable = Glass.enabled, immediate = true)
             hideStatusIcon()
         } else {
+            currentInputConnection?.monitorCursorAnchor(enable = true, immediate = false)
             showStatusIcon(StatusIconMapping.fromEntry(fcitx.runImmediately { inputMethodEntryCached }))
         }
         window.window?.let {
             navbarMgr.evaluate(it, isVirtualKeyboard)
         }
+    }
+
+    /**
+     * Per-session one-way latch: in docked Liquid Glass mode, keep app full-screen behind the
+     * keyboard unless the focused editor/cursor is inside or right above the keyboard zone,
+     * in which case lock back to `adjustResize` for the rest of this input session.
+     */
+    private var dockedOverlayBlocked = false
+    private var lastDockedCursorScreenBottom = Float.NaN
+
+    private fun resetDockedGlassSession() {
+        dockedOverlayBlocked = false
+        lastDockedCursorScreenBottom = Float.NaN
     }
 
     private var capabilityFlags = CapabilityFlags.DefaultFlags
@@ -565,10 +580,17 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
             super.onConfigurationChanged(newConfig)
         }
         lastKnownConfig = newConfig
+        window.window?.let {
+            navbarMgr.evaluate(it, inputDeviceMgr.isVirtualKeyboard)
+        }
     }
 
     override fun onWindowShown() {
         super.onWindowShown()
+        window.window?.let {
+            navbarMgr.evaluate(it, inputDeviceMgr.isVirtualKeyboard)
+        }
+        ClipboardManager.syncFromSystemClipboard()
         try {
             highlightColor = styledColorCompat(android.R.attr.colorAccent).alpha(0.4f)
         } catch (_: Exception) {
@@ -607,9 +629,60 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
 
     private var inputViewLocation = intArrayOf(0, 0)
 
+    fun updateFloatingWindowState() {
+        window.window?.let {
+            navbarMgr.evaluate(it, inputDeviceMgr.isVirtualKeyboard)
+        }
+        if (inputDeviceMgr.isVirtualKeyboard && Glass.enabled && inputView?.isFloating != true) {
+            resetDockedGlassSession()
+            currentInputConnection?.monitorCursorAnchor(enable = true, immediate = true)
+        }
+        if (::decorView.isInitialized) {
+            decorView.requestLayout()
+        }
+    }
+
     override fun onComputeInsets(outInsets: Insets) {
         if (inputDeviceMgr.isVirtualKeyboard) {
-            inputView?.keyboardView?.getLocationInWindow(inputViewLocation)
+            val view = inputView
+            if (view != null && view.isFloating) {
+                val n = decorView.findViewById<View>(android.R.id.navigationBarBackground)?.height ?: 0
+                val h = decorView.height - n
+                outInsets.apply {
+                    contentTopInsets = h
+                    visibleTopInsets = h
+                    touchableInsets = Insets.TOUCHABLE_INSETS_REGION
+                    touchableRegion.setEmpty()
+                    view.collectTouchableRegions(touchableRegion)
+                }
+                return
+            }
+            if (view != null && Glass.enabled && !dockedOverlayBlocked && !isFullscreenMode && decorView.height > 0) {
+                val kv = view.keyboardView
+                if (kv.isShown && kv.height > 0 && lastDockedCursorScreenBottom.isFinite()) {
+                    kv.getLocationOnScreen(inputViewLocation)
+                    if (inputViewLocation[1] > 0 && lastDockedCursorScreenBottom >= inputViewLocation[1] - dp(36)) {
+                        dockedOverlayBlocked = true
+                    }
+                }
+            }
+            if (view != null && Glass.enabled && !dockedOverlayBlocked && !isFullscreenMode && decorView.height > 0) {
+                val n = decorView.findViewById<View>(android.R.id.navigationBarBackground)?.height ?: 0
+                val h = decorView.height - n
+                outInsets.apply {
+                    contentTopInsets = h
+                    visibleTopInsets = h
+                    if (view.keyboardView.isShown && view.keyboardView.height > 0) {
+                        touchableInsets = Insets.TOUCHABLE_INSETS_REGION
+                        touchableRegion.setEmpty()
+                        view.collectTouchableRegions(touchableRegion)
+                    } else {
+                        touchableInsets = Insets.TOUCHABLE_INSETS_FRAME
+                    }
+                }
+                return
+            }
+            view?.keyboardView?.getLocationInWindow(inputViewLocation)
             outInsets.apply {
                 contentTopInsets = inputViewLocation[1]
                 visibleTopInsets = inputViewLocation[1]
@@ -745,6 +818,9 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         capabilityFlags = flags
         // EditorInfo may change between onStartInput and onStartInputView
         inputDeviceMgr.notifyOnStartInput(attribute)
+        if (!restarting) {
+            resetDockedGlassSession()
+        }
         Timber.d("onStartInput: initialSel=${selection.current}, restarting=$restarting")
         val isNullType = attribute.isTypeNull()
         // wait until InputContext created/activated
@@ -767,6 +843,9 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
 
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
         Timber.d("onStartInputView: restarting=$restarting")
+        if (!restarting) {
+            resetDockedGlassSession()
+        }
         postFcitxJob {
             focus(true)
         }
@@ -774,6 +853,15 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
             // because onStartInputView will always be called after onStartInput,
             // editorInfo and capFlags should be up-to-date
             inputView?.startInput(info, capabilityFlags, restarting)
+            if (Glass.enabled && !dockedOverlayBlocked && !isFullscreenMode && inputView?.isFloating != true) {
+                val scheduled = currentInputConnection?.monitorCursorAnchor(enable = true, immediate = true) == true
+                Timber.d(
+                    "dockedGlass startInputView: pkg=%s imeAction=%d cursorMonitor=%s",
+                    info.packageName,
+                    info.imeOptions and EditorInfo.IME_MASK_ACTION,
+                    scheduled
+                )
+            }
         } else {
             if (currentInputConnection?.monitorCursorAnchor() != true) {
                 if (!decorLocationUpdated) {
@@ -829,6 +917,10 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     private val anchorPosition = floatArrayOf(0f, 0f, 0f, 0f)
 
     override fun onUpdateCursorAnchorInfo(info: CursorAnchorInfo) {
+        if (inputDeviceMgr.isVirtualKeyboard) {
+            handleDockedGlassCursorAnchor(info)
+            return
+        }
         val bounds = info.getCharacterBounds(0)
         if (bounds != null) {
             // anchor to start of composing span instead of insertion mark if available
@@ -861,6 +953,72 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         anchorPosition[2] -= xOffset
         anchorPosition[3] -= yOffset
         candidatesView?.updateCursorAnchor(anchorPosition, contentSize)
+    }
+
+    private fun handleDockedGlassCursorAnchor(info: CursorAnchorInfo) {
+        if (!Glass.enabled || dockedOverlayBlocked || isFullscreenMode) return
+        val bounds = info.getCharacterBounds(0)
+        var resolvedScreenBottom: Float? = null
+        val srcBottom = when {
+            bounds != null && bounds.bottom.isFinite() -> bounds.bottom
+            info.insertionMarkerBottom.isFinite() -> info.insertionMarkerBottom
+            else -> Float.NaN
+        }
+        if (srcBottom.isFinite()) {
+            val srcX = when {
+                bounds != null && bounds.left.isFinite() -> bounds.left
+                info.insertionMarkerHorizontal.isFinite() -> info.insertionMarkerHorizontal
+                else -> 0f
+            }
+            anchorPosition[0] = srcX
+            anchorPosition[1] = srcBottom
+            anchorPosition[2] = srcX
+            anchorPosition[3] = srcBottom
+            info.matrix.mapPoints(anchorPosition)
+            val mappedY = anchorPosition[1]
+            if (mappedY.isFinite()) {
+                resolvedScreenBottom = mappedY
+            }
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val eb = info.editorBoundsInfo?.editorBounds
+            if (eb != null && !eb.isEmpty) {
+                anchorPosition[0] = eb.centerX()
+                anchorPosition[1] = eb.top
+                anchorPosition[2] = eb.centerX()
+                anchorPosition[3] = eb.bottom
+                info.matrix.mapPoints(anchorPosition)
+                val ebHeight = anchorPosition[3] - anchorPosition[1]
+                val ebBottom = anchorPosition[3]
+                Timber.d(
+                    "dockedGlass editorBounds: pkg=%s height=%.1f screenBottom=%.1f",
+                    currentInputEditorInfo?.packageName,
+                    ebHeight,
+                    ebBottom
+                )
+                if (ebHeight in 1f..dp(160).toFloat() && ebBottom.isFinite()) {
+                    resolvedScreenBottom = ebBottom
+                }
+            }
+        }
+        val cursorScreenBottom = resolvedScreenBottom ?: return
+        lastDockedCursorScreenBottom = cursorScreenBottom
+        val kv = inputView?.keyboardView ?: return
+        if (!kv.isShown || kv.height <= 0) return
+        kv.getLocationOnScreen(inputViewLocation)
+        val keyboardScreenTop = inputViewLocation[1].toFloat()
+        val safeGap = dp(36).toFloat()
+        Timber.d(
+            "dockedGlass cursor: pkg=%s cursorScreenBottom=%.1f kbScreenTop=%.1f",
+            currentInputEditorInfo?.packageName,
+            cursorScreenBottom,
+            keyboardScreenTop
+        )
+        if (keyboardScreenTop > 0f && cursorScreenBottom >= keyboardScreenTop - safeGap) {
+            dockedOverlayBlocked = true
+            if (::decorView.isInitialized) {
+                decorView.requestLayout()
+            }
+        }
     }
 
     private fun handleCursorUpdate(
@@ -1060,6 +1218,7 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     override fun onFinishInputView(finishingInput: Boolean) {
         Timber.d("onFinishInputView: finishingInput=$finishingInput")
         decorLocationUpdated = false
+        resetDockedGlassSession()
         inputDeviceMgr.onFinishInputView()
         currentInputConnection?.apply {
             finishComposingText()

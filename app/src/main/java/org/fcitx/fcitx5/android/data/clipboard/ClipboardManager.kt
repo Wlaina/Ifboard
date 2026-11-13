@@ -4,6 +4,7 @@
  */
 package org.fcitx.fcitx5.android.data.clipboard
 
+import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.os.Build
@@ -74,7 +75,12 @@ object ClipboardManager : ClipboardManager.OnPrimaryClipChangedListener,
 
     @Keep
     private val limitListener = ManagedPreference.OnChangeListener<Int> { _, _ ->
-        launch { removeOutdated() }
+        launch {
+            mutex.withLock {
+                removeOutdated()
+                updateItemCount()
+            }
+        }
     }
 
     var lastEntry: ClipboardEntry? = null
@@ -82,6 +88,13 @@ object ClipboardManager : ClipboardManager.OnPrimaryClipChangedListener,
     private fun updateLastEntry(entry: ClipboardEntry) {
         lastEntry = entry
         onUpdateListeners.forEach { it.onUpdate(entry) }
+    }
+
+    private fun clearLastEntry(predicate: (ClipboardEntry) -> Boolean) {
+        val current = lastEntry ?: return
+        if (predicate(current)) {
+            lastEntry = null
+        }
     }
 
     fun init(context: Context) {
@@ -120,11 +133,13 @@ object ClipboardManager : ClipboardManager.OnPrimaryClipChangedListener,
     }
 
     suspend fun delete(id: Int) {
+        clearLastEntry { it.id == id }
         clbDao.markAsDeleted(id)
         updateItemCount()
     }
 
     suspend fun deleteAll(skipPinned: Boolean = true): IntArray {
+        clearLastEntry { !skipPinned || !it.pinned }
         val ids = if (skipPinned) {
             clbDao.findUnpinnedIds()
         } else {
@@ -146,16 +161,31 @@ object ClipboardManager : ClipboardManager.OnPrimaryClipChangedListener,
 
     suspend fun nukeTable() {
         withContext(coroutineContext) {
+            lastEntry = null
             clbDb.clearAllTables()
             updateItemCount()
         }
     }
 
+    private val processStartTime = System.currentTimeMillis()
     private var lastClipTimestamp = -1L
     private var lastClipHash = 0
 
     override fun onPrimaryClipChanged() {
-        val clip = clipboardManager.primaryClip ?: return
+        val clip = runCatching { clipboardManager.primaryClip }.getOrNull() ?: return
+        handlePrimaryClip(clip, fromListener = true)
+    }
+
+    /**
+     * 主动从系统剪贴板同步一次当前内容，避免在输入法尚未唤醒时漏记系统复制事件。
+     */
+    fun syncFromSystemClipboard() {
+        if (!::clbDao.isInitialized || !enabledPref.getValue()) return
+        val clip = runCatching { clipboardManager.primaryClip }.getOrNull() ?: return
+        handlePrimaryClip(clip, fromListener = false)
+    }
+
+    private fun handlePrimaryClip(clip: ClipData, fromListener: Boolean) {
         /**
          * skip duplicate ClipData
          * https://developer.android.com/reference/android/content/ClipboardManager.OnPrimaryClipChangedListener#onPrimaryClipChanged()
@@ -173,12 +203,15 @@ object ClipboardManager : ClipboardManager.OnPrimaryClipChangedListener,
         }
         launch {
             mutex.withLock {
-                val entry = ClipboardEntry.fromClipData(clip, transformer) ?: return@withLock
+                val entry = ClipboardEntry.fromClipData(clip, transformer, appContext) ?: return@withLock
                 if (entry.text.isBlank()) return@withLock
                 try {
                     clbDao.find(entry.text, entry.sensitive)?.let {
-                        updateLastEntry(it.copy(timestamp = entry.timestamp))
-                        clbDao.updateTime(it.id, entry.timestamp)
+                        // 主动同步发现库中已存在时，不覆盖原时间戳或重复弹出工具栏提示
+                        if (fromListener) {
+                            updateLastEntry(it.copy(timestamp = entry.timestamp))
+                            clbDao.updateTime(it.id, entry.timestamp)
+                        }
                         return@withLock
                     }
                     val insertedEntry = clbDb.withTransaction {
@@ -187,47 +220,22 @@ object ClipboardManager : ClipboardManager.OnPrimaryClipChangedListener,
                         // new entry can be deleted immediately if clipboard limit == 0
                         clbDao.get(rowId) ?: entry
                     }
-                    updateLastEntry(insertedEntry)
+                    if (fromListener || entry.timestamp >= processStartTime - 60_000L) {
+                        updateLastEntry(insertedEntry)
+                    }
                     updateItemCount()
                 } catch (exception: Exception) {
                     Timber.w("Failed to update clipboard database: $exception")
-                    updateLastEntry(entry)
+                    if (fromListener) updateLastEntry(entry)
                 }
             }
         }
     }
 
-    /** Only keep entries from the last day (pinned entries are kept) */
-    const val MAX_AGE_MS = 24L * 60 * 60 * 1000
-    /** Total number of entries shown in the panel: text + screenshots/images */
-    const val MAX_PANEL_ITEMS = 20
-
-    /**
-     * Drop text entries older than one day, then enforce a combined limit of
-     * [MAX_PANEL_ITEMS] for text entries and images (given by their timestamps).
-     * @return cutoff timestamp; images older than it should not be shown
-     */
-    suspend fun trimForPanel(imageTimestamps: List<Long>): Long {
-        clbDao.markUnpinnedAsDeletedEarlierThan(System.currentTimeMillis() - MAX_AGE_MS)
-        val all = (clbDao.unpinnedTimestamps() + imageTimestamps).sortedDescending()
-        val cutoff = if (all.size > MAX_PANEL_ITEMS) all[MAX_PANEL_ITEMS - 1] else 0L
-        if (cutoff > 0) clbDao.markUnpinnedAsDeletedEarlierThan(cutoff)
-        clbDao.realDelete()
-        updateItemCount()
-        return cutoff
-    }
-
     private suspend fun removeOutdated() {
-        clbDao.markUnpinnedAsDeletedEarlierThan(System.currentTimeMillis() - MAX_AGE_MS)
-        val limit = limitPref.getValue()
-        val unpinned = clbDao.getAllUnpinned()
-        if (unpinned.size > limit) {
-            // the last one we will keep
-            val last = unpinned
-                .sortedBy { it.id }
-                .getOrNull(unpinned.size - limit)
-            // delete all unpinned before that, or delete all when limit <= 0
-            clbDao.markUnpinnedAsDeletedEarlierThan(last?.timestamp ?: System.currentTimeMillis())
+        val toDelete = ClipboardEntry.selectOutdatedIds(clbDao.getAllUnpinned(), limitPref.getValue())
+        if (toDelete.isNotEmpty()) {
+            clbDao.markAsDeleted(*toDelete)
         }
     }
 

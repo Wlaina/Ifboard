@@ -9,13 +9,14 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.recyclerview.widget.RecyclerView
 import splitties.views.bottomPadding
+import kotlin.math.max
 
 fun RecyclerView.applyNavBarInsetsBottomPadding() {
     clipToPadding = false
     ViewCompat.setOnApplyWindowInsetsListener(this) { _, windowInsets ->
-        windowInsets.getInsets(WindowInsetsCompat.Type.navigationBars()).also {
-            bottomPadding = it.bottom
-        }
+        val navBars = windowInsets.getInsets(WindowInsetsCompat.Type.navigationBars())
+        val mandatory = windowInsets.getInsets(WindowInsetsCompat.Type.mandatorySystemGestures())
+        bottomPadding = max(navBars.bottom, mandatory.bottom)
         windowInsets
     }
 }

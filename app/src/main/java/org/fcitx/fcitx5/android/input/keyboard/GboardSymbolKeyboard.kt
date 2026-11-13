@@ -87,7 +87,6 @@ class GboardSymbolKeyboard(
             textSize = 13.5f * context.resources.displayMetrics.scaledDensity
             textAlign = android.graphics.Paint.Align.CENTER
             GboardFont.get(context)?.let { typeface = it }
-            applyKeycapStroke(context.resources.displayMetrics.density, 0.35f)
         }
         private val cellW = paint.textSize * 0.68f
         private val cellH = paint.textSize * 1.02f

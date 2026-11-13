@@ -17,7 +17,6 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.TextView
 import android.widget.Toast
-import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
@@ -59,8 +58,7 @@ class IfboardActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         setTheme(R.style.Theme_Ifboard_Page)
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
-        WarmPaperUi.applySystemBars(this)
+        WarmPaperUi.enableEdgeToEdge(this)
 
         val root = FrameLayout(this)
         val monet = MonetBackgroundView(this).apply { id = R.id.monet_bg }
@@ -79,11 +77,11 @@ class IfboardActivity : AppCompatActivity() {
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, windowInsets ->
             val statusBars = windowInsets.getInsets(WindowInsetsCompat.Type.statusBars())
             val navBars = windowInsets.getInsets(WindowInsetsCompat.Type.navigationBars())
-            root.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+            container.updateLayoutParams<ViewGroup.MarginLayoutParams> {
                 leftMargin = navBars.left
                 rightMargin = navBars.right
             }
-            toolbar.topPadding = statusBars.top
+            toolbar.setPadding(navBars.left, statusBars.top, navBars.right, 0)
             windowInsets
         }
 

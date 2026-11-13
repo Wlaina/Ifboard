@@ -36,6 +36,10 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
         val pid = int("pid", 0)
         val editorInfoInspector = bool("editor_info_inspector", false)
         val needNotifications = bool("need_notifications", true)
+        val floatingX = int("floating_x", -1)
+        val floatingY = int("floating_y", -1)
+        val floatingXLandscape = int("floating_x_landscape", -1)
+        val floatingYLandscape = int("floating_y_landscape", -1)
     }
 
     inner class Advanced : ManagedPreferenceCategory(R.string.advanced, sharedPreferences) {
@@ -147,6 +151,12 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
             "keep_keyboard_letters_uppercase",
             false
         )
+        val floatingKeyboard = switch(
+            R.string.floating_keyboard,
+            "floating_keyboard",
+            false,
+            summary = R.string.floating_keyboard_summary
+        )
 
         val showVoiceInputButton =
             switch(R.string.show_voice_input_button, "show_voice_input_button", true)
@@ -245,7 +255,7 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
                 R.string.keyboard_bottom_padding,
                 R.string.portrait,
                 "keyboard_bottom_padding",
-                6,
+                5,
                 R.string.landscape,
                 "keyboard_bottom_padding_landscape",
                 0,
@@ -421,6 +431,10 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
             listOf(
                 internal.verboseLog,
                 internal.editorInfoInspector,
+                internal.floatingX,
+                internal.floatingY,
+                internal.floatingXLandscape,
+                internal.floatingYLandscape,
                 advanced.ignoreSystemCursor,
                 advanced.disableAnimation,
                 advanced.vivoKeypressWorkaround

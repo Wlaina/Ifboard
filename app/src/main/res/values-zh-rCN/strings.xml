@@ -328,5 +328,9 @@
     <string name="gb_auto_capitalize">英文自动大写</string>
     <string name="gb_double_space_period">英文双击空格键插入句号</string>
     <string name="ifb_glass_effect">液态玻璃效果</string>
-    <string name="ifb_glass_effect_summary">键盘背景和长按弹出栏变成半透明毛玻璃，能隐约看到后面的内容。关闭后恢复不透明，更省电</string>
+    <string name="ifb_glass_effect_summary">仅在系统支持跨窗口模糊（Android 12+ 且 ROM 开启该特性）时，键盘背景才会呈现半透明高斯模糊液态玻璃；不支持的系统保持不透明背景并保留弹窗磨砂。关闭后更省电</string>
+    <string name="clear_all_images">清空所有图片</string>
+    <string name="floating_keyboard">悬浮键盘</string>
+    <string name="floating_keyboard_summary">切换为可自由拖动的圆角悬浮窗口（仅系统支持跨窗口模糊时呈现高斯模糊液态玻璃效果）</string>
+    <string name="dock_keyboard">贴回底部</string>
 </resources>

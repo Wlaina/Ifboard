@@ -5,6 +5,9 @@
 package org.fcitx.fcitx5.android.input.popup
 
 import android.graphics.Rect
+import android.graphics.Region
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.GradientDrawable
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -13,11 +16,12 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.fcitx.fcitx5.android.data.theme.ThemeManager
+import org.fcitx.fcitx5.android.input.Glass
+import org.fcitx.fcitx5.android.input.InputView
 import org.fcitx.fcitx5.android.input.broadcast.PunctuationComponent
 import org.fcitx.fcitx5.android.input.dependency.context
 import org.fcitx.fcitx5.android.input.dependency.inputMethodService
 import org.fcitx.fcitx5.android.input.dependency.inputView
-import org.fcitx.fcitx5.android.input.Glass
 import org.fcitx.fcitx5.android.input.dependency.theme
 import org.fcitx.fcitx5.android.input.keyboard.KeyAction
 import org.fcitx.fcitx5.android.input.keyboard.KeyDef
@@ -109,13 +113,40 @@ class PopupComponent :
         // only dim the keyboard area (toolbar + keys), not the app behind it
         val kv = inputView.keyboardView
         kv.getLocationInWindow(scrimLoc)
-        val lp = FrameLayout.LayoutParams(-1, kv.height).apply {
+        scrim.background = if (inputView.isFloating) {
+            GradientDrawable().apply {
+                setColor(0x33000000)
+                cornerRadius = context.dp(InputView.FLOATING_CORNER_DP)
+            }
+        } else {
+            ColorDrawable(0x33000000)
+        }
+        val lp = FrameLayout.LayoutParams(kv.width, kv.height).apply {
+            leftMargin = scrimLoc[0] - rootBounds.left
             topMargin = scrimLoc[1] - rootBounds.top
         }
         if (scrim.parent == null) root.addView(scrim, 0, lp) else scrim.layoutParams = lp
         if (fresh && !disableAnimation) {
             scrim.alpha = 0f
             scrim.animate().alpha(1f).setDuration(160).start()
+        }
+    }
+
+    fun collectTouchableRegions(region: Region) {
+        val loc = IntArray(2)
+        showingContainerUi.values.forEach { container ->
+            val v = container.root
+            if (v.isShown && v.width > 0 && v.height > 0) {
+                v.getLocationInWindow(loc)
+                region.op(loc[0], loc[1], loc[0] + v.width, loc[1] + v.height, Region.Op.UNION)
+            }
+        }
+        showingEntryUi.values.forEach { entry ->
+            val v = entry.root
+            if (v.isShown && v.width > 0 && v.height > 0) {
+                v.getLocationInWindow(loc)
+                region.op(loc[0], loc[1], loc[0] + v.width, loc[1] + v.height, Region.Op.UNION)
+            }
         }
     }
 

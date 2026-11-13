@@ -557,7 +557,7 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
         ClipboardManager.lastEntry?.let {
             val now = System.currentTimeMillis()
             val clipboardTimeout = clipboardItemTimeout.getValue() * 1000L
-            if (now - it.timestamp < clipboardTimeout) {
+            if (clipboardTimeout < 0L || now - it.timestamp < clipboardTimeout) {
                 onClipboardUpdateListener.onUpdate(it)
             }
         }

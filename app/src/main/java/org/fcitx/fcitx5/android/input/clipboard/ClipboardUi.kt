@@ -16,6 +16,7 @@ import org.fcitx.fcitx5.android.data.theme.ThemeManager
 import org.fcitx.fcitx5.android.input.bar.ui.ToolButton
 import splitties.dimensions.dp
 import splitties.views.backgroundColor
+import splitties.views.bottomPadding
 import splitties.views.dsl.coordinatorlayout.coordinatorLayout
 import splitties.views.dsl.coordinatorlayout.defaultLParams
 import splitties.views.dsl.core.Ui
@@ -31,13 +32,26 @@ import timber.log.Timber
 class ClipboardUi(override val ctx: Context, private val theme: Theme) : Ui {
 
     val textRecyclerView = recyclerView {
+        clipToPadding = false
+        bottomPadding = dp(6)
         addItemDecoration(SpacesItemDecoration(dp(4)))
     }
 
     val imageRecyclerView = recyclerView {
+        clipToPadding = false
+        bottomPadding = dp(6)
         addItemDecoration(SpacesItemDecoration(dp(4)))
         visibility = View.GONE
     }
+
+    var bottomInset: Int = 0
+        set(value) {
+            if (field == value) return
+            field = value
+            val pad = ctx.dp(6) + value
+            textRecyclerView.bottomPadding = pad
+            imageRecyclerView.bottomPadding = pad
+        }
 
     val columnsContainer = horizontalLayout {
         add(textRecyclerView, lParams(0, matchParent) { weight = 1f })
@@ -94,13 +108,58 @@ class ClipboardUi(override val ctx: Context, private val theme: Theme) : Ui {
 
     private var lastState: ClipboardStateMachine.State? = null
 
+    /** 有文字记录或无图片时显示左栏；仅有截图/图片时隐藏空白文字栏 */
+    var hasText = true
+        set(value) {
+            if (field == value) return
+            field = value
+            updateColumnVisibility()
+        }
+
     /** Gboard style: separate text and screenshot columns when screenshots are present */
     var hasImages = false
         set(value) {
+            if (field == value) return
             field = value
-            imageRecyclerView.visibility = if (value) View.VISIBLE else View.GONE
+            updateColumnVisibility()
             lastState?.let { switchUiByState(it, animate = false) }
         }
+
+    private fun updateColumnVisibility() {
+        textRecyclerView.visibility = if (hasText || !hasImages) View.VISIBLE else View.GONE
+        imageRecyclerView.visibility = if (hasImages) View.VISIBLE else View.GONE
+        syncColumnLayoutManagers()
+    }
+
+    /**
+     * 仅文本时文本区采用 2 列瀑布流；图文并存时文本与图片各占 1 列；
+     * 仅图片时图片区采用 2 列瀑布流，切换过程双向自适应。
+     */
+    fun syncColumnLayoutManagers() {
+        if (!hasImages) {
+            if (textRecyclerView.layoutManager !is androidx.recyclerview.widget.StaggeredGridLayoutManager) {
+                textRecyclerView.recycledViewPool.clear()
+                textRecyclerView.layoutManager = androidx.recyclerview.widget.StaggeredGridLayoutManager(
+                    2, androidx.recyclerview.widget.StaggeredGridLayoutManager.VERTICAL
+                )
+            }
+        } else if (textRecyclerView.layoutManager !is androidx.recyclerview.widget.LinearLayoutManager) {
+            textRecyclerView.recycledViewPool.clear()
+            textRecyclerView.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(ctx)
+        }
+
+        if (hasImages && !hasText) {
+            if (imageRecyclerView.layoutManager !is androidx.recyclerview.widget.StaggeredGridLayoutManager) {
+                imageRecyclerView.recycledViewPool.clear()
+                imageRecyclerView.layoutManager = androidx.recyclerview.widget.StaggeredGridLayoutManager(
+                    2, androidx.recyclerview.widget.StaggeredGridLayoutManager.VERTICAL
+                )
+            }
+        } else if (imageRecyclerView.layoutManager !is androidx.recyclerview.widget.LinearLayoutManager) {
+            imageRecyclerView.recycledViewPool.clear()
+            imageRecyclerView.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(ctx)
+        }
+    }
 
     fun switchUiByState(state: ClipboardStateMachine.State, animate: Boolean = true) {
         lastState = state

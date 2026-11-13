@@ -25,7 +25,6 @@ import org.fcitx.fcitx5.android.data.theme.Theme
 import org.fcitx.fcitx5.android.data.theme.ThemeManager
 import org.fcitx.fcitx5.android.data.theme.ThemePrefs
 import org.fcitx.fcitx5.android.utils.item
-import org.fcitx.fcitx5.android.utils.navbarFrameHeight
 import org.fcitx.fcitx5.android.utils.styledColorCompat
 import splitties.views.dsl.core.withTheme
 import kotlin.math.max
@@ -119,11 +118,8 @@ abstract class BaseInputView(
         val mandatory = insets.getInsets(WindowInsetsCompat.Type.mandatorySystemGestures())
         var insetsBottom = max(navBars.bottom, mandatory.bottom)
         if (insetsBottom <= 0) {
-            // check system gesture insets and fallback to navigation_bar_frame_height just in case
-            val gesturesBottom = insets.getInsets(WindowInsetsCompat.Type.systemGestures()).bottom
-            if (gesturesBottom > 0) {
-                insetsBottom = max(gesturesBottom, context.navbarFrameHeight())
-            }
+            // 若系统隐藏了手势指示条，则仅使用实际 systemGestures 底部高度，避免强行撑出 48dp 空白
+            insetsBottom = insets.getInsets(WindowInsetsCompat.Type.systemGestures()).bottom
         }
         return insetsBottom
     }

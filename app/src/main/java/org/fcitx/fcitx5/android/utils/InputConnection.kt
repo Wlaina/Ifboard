@@ -14,20 +14,30 @@ fun InputConnection.withBatchEdit(block: InputConnection.() -> Unit) {
     endBatchEdit()
 }
 
-fun InputConnection.monitorCursorAnchor(enable: Boolean = true): Boolean {
+fun InputConnection.monitorCursorAnchor(enable: Boolean = true, immediate: Boolean = false): Boolean {
     if (!enable) {
         requestCursorUpdates(0)
         return false
     }
+    val mode = if (immediate) {
+        InputConnection.CURSOR_UPDATE_IMMEDIATE or InputConnection.CURSOR_UPDATE_MONITOR
+    } else {
+        InputConnection.CURSOR_UPDATE_MONITOR
+    }
     var scheduled = false
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        scheduled = requestCursorUpdates(
-            InputConnection.CURSOR_UPDATE_MONITOR,
-            InputConnection.CURSOR_UPDATE_FILTER_CHARACTER_BOUNDS or InputConnection.CURSOR_UPDATE_FILTER_INSERTION_MARKER
-        )
+        val filter = if (immediate) {
+            InputConnection.CURSOR_UPDATE_FILTER_CHARACTER_BOUNDS or
+                InputConnection.CURSOR_UPDATE_FILTER_INSERTION_MARKER or
+                InputConnection.CURSOR_UPDATE_FILTER_EDITOR_BOUNDS
+        } else {
+            InputConnection.CURSOR_UPDATE_FILTER_CHARACTER_BOUNDS or
+                InputConnection.CURSOR_UPDATE_FILTER_INSERTION_MARKER
+        }
+        scheduled = requestCursorUpdates(mode, filter)
     }
     if (!scheduled) {
-        scheduled = requestCursorUpdates(InputConnection.CURSOR_UPDATE_MONITOR)
+        scheduled = requestCursorUpdates(mode)
     }
     return scheduled
 }

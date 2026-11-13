@@ -28,7 +28,10 @@ import com.google.android.material.snackbar.BaseTransientBottomBar.BaseCallback
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.snackbar.SnackbarContentLayout
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import androidx.paging.CombinedLoadStates
+import androidx.paging.LoadState
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.data.clipboard.ClipboardManager
 import org.fcitx.fcitx5.android.data.clipboard.db.ClipboardEntry
@@ -107,15 +110,61 @@ class ClipboardWindow : InputWindow.ExtendedInputWindow<ClipboardWindow>() {
     // Separate left/right columns: text (最近 / 已固定) + screenshots (截图)
     private val recentHeader by lazy { SectionHeaderAdapter(theme, "最近") }
     private val pinnedHeader by lazy { SectionHeaderAdapter(theme, "已固定") }
-    private val screenshotHeader by lazy { SectionHeaderAdapter(theme, "截图") }
+    private val screenshotHeader by lazy {
+        SectionHeaderAdapter(
+            theme,
+            title = "截图",
+            actionText = context.getString(R.string.delete_all),
+            actionIconRes = R.drawable.ic_baseline_delete_sweep_24,
+            actionContentDescription = context.getString(R.string.clear_all_images),
+            onActionClick = { dismissAllImagesWithUndo() }
+        )
+    }
     private val adapter: ClipboardAdapter by lazy { newEntryAdapter() }
     private val pinnedAdapter: ClipboardAdapter by lazy { newEntryAdapter() }
     private var pinnedSubmitJob: Job? = null
 
+    override val extendBehindNavBar: Boolean = true
+
+    override fun onBottomInsetChanged(bottomInset: Int) {
+        ui.bottomInset = bottomInset
+    }
+
     private fun updateSections() {
+        val hasText = adapter.itemCount > 0 || pinnedAdapter.itemCount > 0
         recentHeader.visible = adapter.itemCount > 0
         pinnedHeader.visible = pinnedAdapter.itemCount > 0
         screenshotHeader.visible = imageAdapter.itemCount > 0
+        ui.hasText = hasText
+    }
+
+    private var recentStates: CombinedLoadStates? = null
+    private var pinnedStates: CombinedLoadStates? = null
+
+    private fun refreshSectionsAndState() {
+        updateSections()
+        val hasText = adapter.itemCount > 0 || pinnedAdapter.itemCount > 0
+        val recentLoaded = recentStates?.let {
+            it.refresh !is LoadState.Loading && it.append.endOfPaginationReached
+        } == true
+        val pinnedLoaded = pinnedStates?.let {
+            it.refresh !is LoadState.Loading && it.append.endOfPaginationReached
+        } == true
+        if (hasText) {
+            stateMachine.push(ClipboardDbUpdated, ClipboardDbEmpty to false)
+        } else if (recentLoaded && pinnedLoaded) {
+            stateMachine.push(ClipboardDbUpdated, ClipboardDbEmpty to true)
+        }
+    }
+
+    private val recentLoadStateListener: (CombinedLoadStates) -> Unit = {
+        recentStates = it
+        refreshSectionsAndState()
+    }
+
+    private val pinnedLoadStateListener: (CombinedLoadStates) -> Unit = {
+        pinnedStates = it
+        refreshSectionsAndState()
     }
 
     private fun newEntryAdapter(): ClipboardAdapter =
@@ -164,12 +213,14 @@ class ClipboardWindow : InputWindow.ExtendedInputWindow<ClipboardWindow>() {
         ClipboardImageAdapter(
             theme,
             context.dp(clipboardEntryRadius.toFloat()),
-            service.lifecycleScope
-        ) { image ->
-            ClipboardImages.send(service, service.lifecycleScope, image) {
-                if (clipboardReturnAfterPaste) windowManager.attachWindow(KeyboardWindow)
-            }
-        }
+            service.lifecycleScope,
+            onClick = { image ->
+                ClipboardImages.send(service, service.lifecycleScope, image) {
+                    if (clipboardReturnAfterPaste) windowManager.attachWindow(KeyboardWindow)
+                }
+            },
+            onDelete = { image -> dismissSingleImageWithUndo(image) }
+        )
     }
 
     private var imageLoadJob: Job? = null
@@ -177,7 +228,6 @@ class ClipboardWindow : InputWindow.ExtendedInputWindow<ClipboardWindow>() {
     private val ui by lazy {
         ClipboardUi(context, theme).apply {
             textRecyclerView.apply {
-                layoutManager = LinearLayoutManager(context)
                 adapter = ConcatAdapter(
                     recentHeader, this@ClipboardWindow.adapter, pinnedHeader, pinnedAdapter
                 )
@@ -185,10 +235,10 @@ class ClipboardWindow : InputWindow.ExtendedInputWindow<ClipboardWindow>() {
                 itemAnimator = null
             }
             imageRecyclerView.apply {
-                layoutManager = LinearLayoutManager(context)
                 adapter = ConcatAdapter(screenshotHeader, imageAdapter)
                 itemAnimator = null
             }
+            syncColumnLayoutManagers()
             ItemTouchHelper(object : ItemTouchHelper.Callback() {
                 override fun getMovementFlags(
                     recyclerView: RecyclerView,
@@ -251,12 +301,7 @@ class ClipboardWindow : InputWindow.ExtendedInputWindow<ClipboardWindow>() {
                 service.lifecycleScope.launch {
                     val ids = ClipboardManager.deleteAll(skipPinned)
                     if (skipPinned && imageAdapter.itemCount > 0) {
-                        val snapshot = imageAdapter.items
-                        val prevState = ClipboardImages.dismissAll(context, snapshot)
-                        pendingDismissedImages = prevState to snapshot
-                        imageAdapter.submit(emptyList())
-                        ui.hasImages = false
-                        updateSections()
+                        dismissAllImagesWithUndo(triggerSnackbar = false)
                     }
                     showUndoSnackbar(*ids)
                 }
@@ -269,13 +314,58 @@ class ClipboardWindow : InputWindow.ExtendedInputWindow<ClipboardWindow>() {
     }
 
     private val pendingDeleteIds = arrayListOf<Int>()
-    private var pendingDismissedImages: Pair<ClipboardImages.DismissState, List<ClipboardImage>>? = null
+    private var pendingImageDismissState: ClipboardImages.DismissState? = null
+    private var pendingImagesBaseline: List<ClipboardImage> = emptyList()
+    private val pendingDismissedImageUris = linkedSetOf<String>()
+
+    private fun clearPendingImageDismiss() {
+        pendingImageDismissState = null
+        pendingImagesBaseline = emptyList()
+        pendingDismissedImageUris.clear()
+    }
+
+    private fun applyDismissedImages(
+        prevState: ClipboardImages.DismissState,
+        baselineBeforeDelete: List<ClipboardImage>,
+        removed: List<ClipboardImage>,
+        remaining: List<ClipboardImage>
+    ) {
+        if (pendingImageDismissState == null) {
+            pendingImageDismissState = prevState
+            pendingImagesBaseline = baselineBeforeDelete
+        }
+        pendingDismissedImageUris.addAll(removed.map { it.uri.toString() })
+        imageAdapter.submit(remaining)
+        ui.hasImages = remaining.isNotEmpty()
+        updateSections()
+    }
+
+    private fun dismissSingleImageWithUndo(image: ClipboardImage) {
+        val baseline = imageAdapter.items
+        val removed = baseline.filter { it.uri == image.uri }
+        if (removed.isEmpty()) return
+        val prevState = ClipboardImages.dismissOne(context, image)
+        val remaining = baseline.filterNot { it.uri == image.uri }
+        applyDismissedImages(prevState, baseline, removed, remaining)
+        showUndoSnackbar()
+    }
+
+    private fun dismissAllImagesWithUndo(triggerSnackbar: Boolean = true) {
+        val baseline = imageAdapter.items
+        if (baseline.isEmpty()) return
+        val prevState = ClipboardImages.dismissAll(context, baseline)
+        applyDismissedImages(prevState, baseline, baseline, emptyList())
+        if (triggerSnackbar) showUndoSnackbar()
+    }
+
+    private var snackbarSeq = 0
 
     @SuppressLint("RestrictedApi")
     private fun showUndoSnackbar(vararg id: Int) {
         id.forEach { pendingDeleteIds.add(it) }
-        val total = pendingDeleteIds.size + (pendingDismissedImages?.second?.size ?: 0)
+        val total = pendingDeleteIds.size + pendingDismissedImageUris.size
         if (total == 0) return
+        val seq = ++snackbarSeq
         val str = context.resources.getString(R.string.num_items_deleted, total)
         snackbarInstance = Snackbar.make(snackbarCtx, ui.root, str, Snackbar.LENGTH_LONG)
             .setBackgroundTint(theme.popupBackgroundColor)
@@ -287,11 +377,12 @@ class ClipboardWindow : InputWindow.ExtendedInputWindow<ClipboardWindow>() {
                         ClipboardManager.undoDelete(*pendingDeleteIds.toIntArray())
                         pendingDeleteIds.clear()
                     }
-                    pendingDismissedImages?.let { (prevState, list) ->
+                    pendingImageDismissState?.let { prevState ->
                         ClipboardImages.restoreDismiss(context, prevState)
-                        pendingDismissedImages = null
-                        imageAdapter.submit(list)
-                        ui.hasImages = list.isNotEmpty()
+                        val restored = pendingImagesBaseline
+                        clearPendingImageDismiss()
+                        imageAdapter.submit(restored)
+                        ui.hasImages = restored.isNotEmpty()
                         updateSections()
                     }
                 }
@@ -301,6 +392,8 @@ class ClipboardWindow : InputWindow.ExtendedInputWindow<ClipboardWindow>() {
                     if (snackbarInstance === transientBottomBar) {
                         snackbarInstance = null
                     }
+                    // 忽略已被新一次删除触发的 Snackbar 替代的旧回调，避免覆盖新生成的待撤销状态
+                    if (seq != snackbarSeq) return
                     when (event) {
                         BaseCallback.DISMISS_EVENT_SWIPE,
                         BaseCallback.DISMISS_EVENT_MANUAL,
@@ -308,7 +401,7 @@ class ClipboardWindow : InputWindow.ExtendedInputWindow<ClipboardWindow>() {
                             service.lifecycleScope.launch {
                                 ClipboardManager.realDelete()
                                 pendingDeleteIds.clear()
-                                pendingDismissedImages = null
+                                clearPendingImageDismiss()
                             }
                         }
                         BaseCallback.DISMISS_EVENT_ACTION,
@@ -323,7 +416,7 @@ class ClipboardWindow : InputWindow.ExtendedInputWindow<ClipboardWindow>() {
                 view.updateLayoutParams<ViewGroup.MarginLayoutParams> {
                     leftMargin = hMargin
                     rightMargin = hMargin
-                    bottomMargin = vMargin
+                    bottomMargin = vMargin + ui.bottomInset
                 }
                 ((view as FrameLayout).getChildAt(0) as SnackbarContentLayout).apply {
                     messageView.letterSpacing = 0f
@@ -334,6 +427,7 @@ class ClipboardWindow : InputWindow.ExtendedInputWindow<ClipboardWindow>() {
     }
 
     override fun onAttached() {
+        clearPendingImageDismiss()
         val isEmpty = ClipboardManager.itemCount == 0
         val isListening = clipboardEnabledPref.getValue()
         val initialState = when {
@@ -347,26 +441,20 @@ class ClipboardWindow : InputWindow.ExtendedInputWindow<ClipboardWindow>() {
         // manually switch to initial ui & sync switch state
         syncListeningSwitch(isListening)
         ui.switchUiByState(initialState)
-        pinnedAdapter.addLoadStateListener { updateSections() }
+        ClipboardManager.syncFromSystemClipboard()
+        pinnedAdapter.addLoadStateListener(pinnedLoadStateListener)
         pinnedSubmitJob = service.lifecycleScope.launch {
-            pinnedPager.flow.collect { pinnedAdapter.submitData(it) }
+            pinnedPager.flow.collectLatest { pinnedAdapter.submitData(it) }
         }
-        adapter.addLoadStateListener {
-            updateSections()
-            val empty = it.append.endOfPaginationReached && adapter.itemCount < 1 && pinnedAdapter.itemCount < 1
-            stateMachine.push(ClipboardDbUpdated, ClipboardDbEmpty to empty)
-        }
+        adapter.addLoadStateListener(recentLoadStateListener)
         adapterSubmitJob = service.lifecycleScope.launch {
-            clipboardEntriesPager.flow.collect {
+            clipboardEntriesPager.flow.collectLatest {
                 adapter.submitData(it)
             }
         }
         clipboardEnabledPref.registerOnChangeListener(clipboardEnabledListener)
         imageLoadJob = service.lifecycleScope.launch {
-            val loaded = withContext(Dispatchers.IO) { ClipboardImages.load(context) }
-            // keep only the last day, max 20 items in total (text + images)
-            val cutoff = ClipboardManager.trimForPanel(loaded.map { it.timestamp })
-            val images = loaded.filter { it.timestamp >= cutoff }
+            val images = withContext(Dispatchers.IO) { ClipboardImages.load(context) }
             imageAdapter.submit(images)
             ui.hasImages = images.isNotEmpty()
             updateSections()
@@ -376,8 +464,13 @@ class ClipboardWindow : InputWindow.ExtendedInputWindow<ClipboardWindow>() {
     override fun onDetached() {
         imageLoadJob?.cancel()
         clipboardEnabledPref.unregisterOnChangeListener(clipboardEnabledListener)
+        adapter.removeLoadStateListener(recentLoadStateListener)
+        pinnedAdapter.removeLoadStateListener(pinnedLoadStateListener)
+        recentStates = null
+        pinnedStates = null
         adapter.onDetached()
         pinnedAdapter.onDetached()
+        imageAdapter.onDetached()
         pinnedSubmitJob?.cancel()
         adapterSubmitJob?.cancel()
         promptMenu?.dismiss()

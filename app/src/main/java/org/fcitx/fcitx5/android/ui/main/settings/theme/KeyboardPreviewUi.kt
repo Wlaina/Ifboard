@@ -125,15 +125,11 @@ class KeyboardPreviewUi(override val ctx: Context, val theme: Theme) : Ui {
     var onSizeMeasured: ((Int, Int) -> Unit)? = null
 
     private fun keyboardWindowAspectRatio(): Pair<Int, Int> {
-        val resources = ctx.resources
-        val displayMetrics = resources.displayMetrics
-        val w = displayMetrics.widthPixels
-        val h = displayMetrics.heightPixels
-        val hPercent = when (resources.configuration.orientation) {
-            Configuration.ORIENTATION_LANDSCAPE -> keyboardHeightPercentLandscape
-            else -> keyboardHeightPercent
-        }
-        return w to (h * hPercent / 100)
+        val landscape = ctx.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val w = ctx.resources.displayMetrics.widthPixels
+        val hPercent = if (landscape) keyboardHeightPercentLandscape else keyboardHeightPercent
+        val baseType = AppPrefs.getInstance().advanced.keyboardHeightPercentBase.getValue()
+        return w to baseType.computeKeyboardHeightPx(ctx, hPercent, landscape)
     }
 
     init {

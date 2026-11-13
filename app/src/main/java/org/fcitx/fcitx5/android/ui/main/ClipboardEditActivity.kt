@@ -6,8 +6,11 @@ package org.fcitx.fcitx5.android.ui.main
 
 import android.app.Activity
 import android.content.ClipData
+import android.content.ClipDescription
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
+import android.os.PersistableBundle
 import android.view.Gravity
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
@@ -29,6 +32,8 @@ class ClipboardEditActivity : Activity() {
     private lateinit var editText: EditText
 
     private var entryId: Int = -1
+    private var entrySensitive: Boolean = false
+    private var finishing = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -45,18 +50,33 @@ class ClipboardEditActivity : Activity() {
     }
 
     private fun finishEditing(copy: Boolean = false) {
+        if (finishing) return
+        finishing = true
         val str = editText.str
         scope.launch {
             ClipboardManager.updateText(entryId, str)
             if (copy) {
-                clipboardManager.setPrimaryClip(ClipData.newPlainText("", str))
+                val clip = ClipData.newPlainText("", str).apply {
+                    if (entrySensitive) {
+                        val key = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            ClipDescription.EXTRA_IS_SENSITIVE
+                        } else {
+                            "android.content.extra.IS_SENSITIVE"
+                        }
+                        description.extras = (description.extras ?: PersistableBundle()).apply {
+                            putBoolean(key, true)
+                        }
+                    }
+                }
+                clipboardManager.setPrimaryClip(clip)
             }
+            if (!isFinishing && !isDestroyed) finish()
         }
-        finish()
     }
 
     private fun setEntry(entry: ClipboardEntry) {
         entryId = entry.id
+        entrySensitive = entry.sensitive
         editText.setText(entry.text)
     }
 

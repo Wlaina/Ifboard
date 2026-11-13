@@ -5,13 +5,75 @@
 
 package org.fcitx.fcitx5.android.input.keyboard
 
+import android.content.Context
+import android.graphics.Point
+import android.os.Build
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.data.prefs.ManagedPreferenceEnum
+import org.fcitx.fcitx5.android.utils.windowManager
+import kotlin.math.roundToInt
 
 enum class KeyboardHeightPercentBase(override val stringRes: Int) : ManagedPreferenceEnum {
-    // Ifboard: Gboard sizes its keyboard in dp, so it looks the same on every phone.
-    // The default percentages (27% portrait / 49% landscape) equal Gboard's default height.
+    // Follow Gboard's physical sizing (~40.4mm portrait / ~28.5mm landscape body + header in dp)
+    // using displayMetrics.ydpi, so phones with identical densityDpi (e.g. both 480dpi) but
+    // different physical DPI match Gboard's height on each device.
     Gboard(R.string.ifb_height_base_gboard),
     DisplayMetrics(R.string.display_metrics),
-    RealSize(R.string.real_size)
+    RealSize(R.string.real_size);
+
+    /** 计算给定百分比与屏幕方向下的按键区域高度（像素）。 */
+    fun computeKeyboardHeightPx(context: Context, percent: Int, landscape: Boolean): Int {
+        if (this == Gboard) {
+            val dm = context.resources.displayMetrics
+            return computeGboardHeightPx(dm.density, dm.ydpi, percent, landscape)
+        }
+        val base = when (this) {
+            DisplayMetrics -> context.resources.displayMetrics.heightPixels
+            RealSize -> Point().also {
+                @Suppress("DEPRECATION")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    context.display
+                } else {
+                    context.windowManager.defaultDisplay
+                }.getRealSize(it)
+            }.y
+            Gboard -> error("unreachable")
+        }
+        return base * percent / 100
+    }
+
+    companion object {
+        // 实测 Gboard：Xiaomi 14 (460.4 ydpi) 竖屏 Header 44dp + Body 732px (40.38mm)；
+        // vivo (397.0 ydpi) 竖屏 Header 44dp + Body 633px (40.49mm)；横屏 Header 41dp + Body 28.5mm
+        private const val GBOARD_PORTRAIT_HEADER_DP = 44f
+        private const val GBOARD_PORTRAIT_BODY_MM = 40.4f
+        private const val GBOARD_LANDSCAPE_HEADER_DP = 41f
+        private const val GBOARD_LANDSCAPE_BODY_MM = 28.5f
+
+        // IFboard 默认自带工具栏 40dp + 底部留白（竖屏 5dp / 横屏 0dp），从 Gboard 总高度扣除后得到按键区高度
+        private const val IFB_PORTRAIT_CHROME_DP = 45f
+        private const val IFB_LANDSCAPE_CHROME_DP = 40f
+        private const val MM_PER_INCH = 25.4f
+
+        /**
+         * 复刻 Gboard 按物理尺寸（`ydpi`）+ 逻辑密度（`density`）计算键盘默认高度的方式，
+         * 使不同物理 DPI 手机上 IFboard 默认总高度均与 Gboard 保持一致。
+         */
+        internal fun computeGboardHeightPx(
+            density: Float,
+            ydpi: Float,
+            percent: Int,
+            landscape: Boolean
+        ): Int {
+            val effectiveYdpi = if (ydpi.isFinite() && ydpi in 72f..960f) ydpi else density * 160f
+            val gboardHeaderDp = if (landscape) GBOARD_LANDSCAPE_HEADER_DP else GBOARD_PORTRAIT_HEADER_DP
+            val gboardBodyMm = if (landscape) GBOARD_LANDSCAPE_BODY_MM else GBOARD_PORTRAIT_BODY_MM
+            val ifbChromeDp = if (landscape) IFB_LANDSCAPE_CHROME_DP else IFB_PORTRAIT_CHROME_DP
+            val defaultPercent = if (landscape) 49f else 27f
+
+            val gboardTotalPx = gboardHeaderDp * density + (gboardBodyMm / MM_PER_INCH) * effectiveYdpi
+            val defaultKeyAreaPx = (gboardTotalPx - ifbChromeDp * density).coerceAtLeast(80f * density)
+            return (defaultKeyAreaPx * (percent / defaultPercent)).roundToInt()
+        }
+    }
 }

@@ -12,6 +12,8 @@ import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
+import android.content.res.Configuration
+import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -27,6 +29,7 @@ import android.view.Menu
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
+import android.view.WindowInsetsController
 import android.widget.ListView
 import android.widget.Toast
 import com.mikepenz.aboutlibraries.Libs
@@ -41,6 +44,18 @@ class AboutActivity : PreferenceActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.setDecorFitsSystemWindows(false)
+            window.statusBarColor = Color.TRANSPARENT
+            window.navigationBarColor = Color.TRANSPARENT
+            window.isNavigationBarContrastEnforced = false
+            window.isStatusBarContrastEnforced = false
+            val dark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+                Configuration.UI_MODE_NIGHT_YES
+            val mask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
+                WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+            window.insetsController?.setSystemBarsAppearance(if (dark) 0 else mask, mask)
+        }
         actionBar?.setDisplayHomeAsUpEnabled(true)
         fragmentManager.beginTransaction()
             .replace(android.R.id.content, AboutContentFragment())
@@ -180,21 +195,22 @@ class AboutActivity : PreferenceActivity() {
             savedInstanceState: Bundle?
         ): View? {
             val view = super.onCreateView(inflater, container, savedInstanceState)
-            // 35+ forces edge-to-edge
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM && view != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && view != null) {
                 val listView = view.findViewById<ListView>(android.R.id.list)
-                listView.clipToPadding = false
-                listView.setOnApplyWindowInsetsListener { v, insets ->
-                    val status = insets.getInsets(WindowInsets.Type.statusBars())
-                    val navbar = insets.getInsets(WindowInsets.Type.navigationBars())
-                    val gesture = insets.getInsets(WindowInsets.Type.mandatorySystemGestures())
-                    v.setPadding(
-                        v.paddingLeft,
-                        status.top,
-                        v.paddingRight,
-                        max(navbar.bottom, gesture.bottom)
-                    )
-                    insets
+                listView?.apply {
+                    clipToPadding = false
+                    setOnApplyWindowInsetsListener { v, insets ->
+                        val status = insets.getInsets(WindowInsets.Type.statusBars())
+                        val navbar = insets.getInsets(WindowInsets.Type.navigationBars())
+                        val gesture = insets.getInsets(WindowInsets.Type.mandatorySystemGestures())
+                        v.setPadding(
+                            max(v.paddingLeft, navbar.left),
+                            status.top,
+                            max(v.paddingRight, navbar.right),
+                            max(navbar.bottom, gesture.bottom)
+                        )
+                        insets
+                    }
                 }
             }
             return view

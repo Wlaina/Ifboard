@@ -26,6 +26,8 @@ import org.fcitx.fcitx5.android.input.dependency.fcitx
 import org.fcitx.fcitx5.android.input.dependency.inputMethodService
 import org.fcitx.fcitx5.android.input.dependency.theme
 import org.fcitx.fcitx5.android.input.editorinfo.EditorInfoWindow
+import org.fcitx.fcitx5.android.input.keyboard.KeyboardWindow
+import org.fcitx.fcitx5.android.input.status.StatusAreaEntry.Android.Type.FloatingKeyboard
 import org.fcitx.fcitx5.android.input.status.StatusAreaEntry.Android.Type.InputMethod
 import org.fcitx.fcitx5.android.input.status.StatusAreaEntry.Android.Type.Keyboard
 import org.fcitx.fcitx5.android.input.status.StatusAreaEntry.Android.Type.ReloadConfig
@@ -54,31 +56,36 @@ class StatusAreaWindow : InputWindow.ExtendedInputWindow<StatusAreaWindow>(),
     private val windowManager: InputWindowManager by manager.must()
 
     private val editorInfoInspector by AppPrefs.getInstance().internal.editorInfoInspector
+    private val floatingKeyboard = AppPrefs.getInstance().keyboard.floatingKeyboard
 
-    private val staticEntries by lazy {
-        arrayOf(
-            StatusAreaEntry.Android(
-                context.getString(R.string.theme),
-                R.drawable.ic_baseline_palette_24,
-                ThemeList
-            ),
-            StatusAreaEntry.Android(
-                context.getString(R.string.input_method_options),
-                R.drawable.ic_baseline_language_24,
-                InputMethod
-            ),
-            StatusAreaEntry.Android(
-                context.getString(R.string.reload_config),
-                R.drawable.ic_baseline_sync_24,
-                ReloadConfig
-            ),
-            StatusAreaEntry.Android(
-                context.getString(R.string.virtual_keyboard),
-                R.drawable.ic_baseline_keyboard_24,
-                Keyboard
-            )
+    private fun buildStaticEntries(): Array<StatusAreaEntry> = arrayOf(
+        StatusAreaEntry.Android(
+            context.getString(R.string.floating_keyboard),
+            R.drawable.ic_gb_floating_keyboard,
+            FloatingKeyboard,
+            active = floatingKeyboard.getValue()
+        ),
+        StatusAreaEntry.Android(
+            context.getString(R.string.theme),
+            R.drawable.ic_baseline_palette_24,
+            ThemeList
+        ),
+        StatusAreaEntry.Android(
+            context.getString(R.string.input_method_options),
+            R.drawable.ic_baseline_language_24,
+            InputMethod
+        ),
+        StatusAreaEntry.Android(
+            context.getString(R.string.reload_config),
+            R.drawable.ic_baseline_sync_24,
+            ReloadConfig
+        ),
+        StatusAreaEntry.Android(
+            context.getString(R.string.virtual_keyboard),
+            R.drawable.ic_baseline_keyboard_24,
+            Keyboard
         )
-    }
+    )
 
     private fun activateAction(action: Action) {
         fcitx.launchOnReady {
@@ -152,6 +159,10 @@ class StatusAreaWindow : InputWindow.ExtendedInputWindow<StatusAreaWindow>(),
                         }
                         Keyboard -> AppUtil.launchMainToKeyboard(context)
                         ThemeList -> AppUtil.launchMainToThemeList(context)
+                        FloatingKeyboard -> {
+                            floatingKeyboard.setValue(!floatingKeyboard.getValue())
+                            windowManager.attachWindow(KeyboardWindow)
+                        }
                     }
                 }
             }
@@ -162,6 +173,16 @@ class StatusAreaWindow : InputWindow.ExtendedInputWindow<StatusAreaWindow>(),
 
     private val keyBorder by ThemeManager.prefs.keyBorder
 
+    private var bottomInset = 0
+
+    override val extendBehindNavBar = true
+
+    override fun onBottomInsetChanged(bottomInset: Int) {
+        if (this.bottomInset == bottomInset) return
+        this.bottomInset = bottomInset
+        view.setPadding(context.dp(11), context.dp(10), context.dp(11), context.dp(10) + bottomInset)
+    }
+
     val view by lazy {
         context.recyclerView {
             if (!keyBorder) {
@@ -170,14 +191,14 @@ class StatusAreaWindow : InputWindow.ExtendedInputWindow<StatusAreaWindow>(),
             // Gboard style: two columns of pill tiles
             layoutManager = gridLayoutManager(2)
             adapter = this@StatusAreaWindow.adapter
-            setPadding(dp(11), dp(10), dp(11), dp(10))
+            setPadding(dp(11), dp(10), dp(11), dp(10) + bottomInset)
             clipToPadding = false
         }
     }
 
     override fun onStatusAreaUpdate(actions: Array<Action>) {
         adapter.entries = arrayOf(
-            *staticEntries,
+            *buildStaticEntries(),
             *Array(actions.size) { StatusAreaEntry.fromAction(actions[it]) }
         )
     }

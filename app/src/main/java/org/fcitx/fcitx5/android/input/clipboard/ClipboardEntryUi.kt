@@ -11,6 +11,8 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.text.TextUtils
 import android.view.View
+import android.view.ViewGroup
+import androidx.recyclerview.widget.RecyclerView
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.data.theme.Theme
 import org.fcitx.fcitx5.android.input.keyboard.CustomGestureView
@@ -21,6 +23,8 @@ import splitties.views.dsl.constraintlayout.centerVertically
 import splitties.views.dsl.constraintlayout.constraintLayout
 import splitties.views.dsl.constraintlayout.endOfParent
 import splitties.views.dsl.constraintlayout.lParams
+import splitties.views.dsl.constraintlayout.matchConstraints
+import splitties.views.dsl.constraintlayout.startOfParent
 import splitties.views.dsl.core.Ui
 import splitties.views.dsl.core.add
 import splitties.views.dsl.core.imageView
@@ -37,7 +41,7 @@ class ClipboardEntryUi(override val ctx: Context, private val theme: Theme, radi
         minLines = 1
         maxLines = 4
         textSize = 14f
-        setPaddingDp(8, 4, 8, 4)
+        setPaddingDp(8, 6, 8, 6)
         ellipsize = TextUtils.TruncateAt.END
         setTextColor(theme.keyTextColor)
     }
@@ -50,7 +54,9 @@ class ClipboardEntryUi(override val ctx: Context, private val theme: Theme, radi
     }
 
     val layout = constraintLayout {
-        add(textView, lParams(matchParent, wrapContent) {
+        add(textView, lParams(matchConstraints, wrapContent) {
+            startOfParent()
+            endOfParent()
             centerVertically()
         })
         add(pin, lParams(dp(12), dp(12)) {
@@ -60,8 +66,13 @@ class ClipboardEntryUi(override val ctx: Context, private val theme: Theme, radi
     }
 
     override val root = CustomGestureView(ctx).apply {
+        // LinearLayoutManager 默认按 wrapContent 测量；若子 view 全为 matchParent 会使 FrameLayout 宽度塌缩为 0
+        layoutParams = RecyclerView.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        )
         isClickable = true
-        minimumHeight = dp(30)
+        minimumHeight = dp(34)
         foreground = RippleDrawable(
             ColorStateList.valueOf(theme.keyPressHighlightColor), null,
             GradientDrawable().apply {
@@ -73,7 +84,7 @@ class ClipboardEntryUi(override val ctx: Context, private val theme: Theme, radi
             cornerRadius = radius
             setColor(theme.clipboardEntryColor)
         }
-        add(layout, lParams(matchParent, matchParent))
+        add(layout, lParams(matchParent, wrapContent))
     }
 
     fun setEntry(text: String, pinned: Boolean) {

@@ -11,21 +11,24 @@ import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.view.View
+import android.view.ViewGroup
 import android.widget.Button
-import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.core.app.NotificationCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updateLayoutParams
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentActivity
 import androidx.viewpager2.adapter.FragmentStateAdapter
 import androidx.viewpager2.widget.ViewPager2
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.databinding.ActivitySetupBinding
+import org.fcitx.fcitx5.android.ui.common.WarmPaperUi
 import org.fcitx.fcitx5.android.ui.setup.SetupPage.Companion.firstUndonePage
 import org.fcitx.fcitx5.android.ui.setup.SetupPage.Companion.isLastPage
 import org.fcitx.fcitx5.android.utils.notificationManager
+import kotlin.math.max
 
 class SetupActivity : FragmentActivity() {
 
@@ -39,11 +42,26 @@ class SetupActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        WarmPaperUi.enableEdgeToEdge(this)
         val binding = ActivitySetupBinding.inflate(layoutInflater)
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, windowInsets ->
-            val sysBars = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars())
-            binding.root.setPadding(sysBars.left, sysBars.top, sysBars.right, sysBars.bottom)
+            val statusBars = windowInsets.getInsets(WindowInsetsCompat.Type.statusBars())
+            val navBars = windowInsets.getInsets(WindowInsetsCompat.Type.navigationBars())
+            val mandatory = windowInsets.getInsets(WindowInsetsCompat.Type.mandatorySystemGestures())
+            val navBottom = max(navBars.bottom, mandatory.bottom)
+            binding.viewpager.setPadding(navBars.left, statusBars.top, navBars.right, navBottom)
+            binding.skipButton.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+                topMargin = statusBars.top
+                rightMargin = navBars.right
+            }
+            binding.prevButton.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+                leftMargin = navBars.left
+                bottomMargin = navBottom
+            }
+            binding.nextButton.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+                rightMargin = navBars.right
+                bottomMargin = navBottom
+            }
             windowInsets
         }
         setContentView(binding.root)
