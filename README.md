@@ -1,19 +1,18 @@
 # Ifboard
 
-基于 [Fcitx5 for Android（小企鹅输入法）](https://github.com/fcitx5-android/fcitx5-android) 0.1.3 的个人定制版输入法。一个 APK 里内置了 Rime 引擎、[雾凇拼音](https://github.com/iDvel/rime-ice)（全拼和小鹤双拼）和英文键盘，外观、手感和动画逐项参照 Gboard，还支持滑行输入。
-
-A personal build of Fcitx5 for Android: Rime with rime-ice (full pinyin / double pinyin) built in, glide typing for Chinese and English, a Gboard-like look, feel and animations, optional on-demand grammar model, inline translation / voice typing and WebDAV dictionary sync.
+基于 [Fcitx5 for Android（小企鹅输入法）](https://github.com/fcitx5-android/fcitx5-android) 0.1.3 的定制输入法生态，提供 **Android 手机端** 与 **[Windows 小狼毫桌面端](windows/README.md)**：一个安装包即可启用 Rime 引擎 + [雾凇拼音](https://github.com/iDvel/rime-ice)（全拼 / 小鹤双拼）+ 万象中文语法模型，支持 Gboard 风格外观/滑行输入、Warm Paper 暖纸液态玻璃界面及跨端 WebDAV 词库双向同步。
 
 ## 安装
 
-1. 从 [Releases](https://github.com/Wlaina/Ifboard/releases) 下载最新的 `arm64-v8a` APK 并安装，在系统设置里启用 Ifboard。
-2. 首次打开应用时，会询问是否下载**万象语法模型**（约 400 MB，用于提升整句输入的准确度）：
-   - 选「下载」后在后台自动完成，不需要任何配置；
-   - 模型保存在应用内，**以后升级 Ifboard 不用重新下载**；
-   - 不下载也能正常打字，之后可以在「同步与更新」里随时下载、检查更新或删除。
-3. **vivo / 小米**：系统默认禁止新装应用「后台弹出界面」，这会导致键盘上的设置、剪贴板编辑、语音授权等页面打不开。应用会提示你，并帮你跳到对应的权限页开启。
+- **Android**：从 [Releases](https://github.com/Wlaina/Ifboard/releases) 下载最新的 `Ifboard-<版本>-arm64-v8a.apk` 并安装，在系统设置里启用 Ifboard。
+  1. 首次打开应用时，会询问是否下载**万象语法模型**（约 400 MB，用于提升整句输入的准确度）：
+     - 选「下载」后在后台自动完成，不需要任何配置；
+     - 模型保存在应用内，**以后升级 Ifboard 不用重新下载**；
+     - 不下载也能正常打字，之后可以在「同步与更新」里随时下载、检查更新或删除。
+  2. **vivo / 小米**：系统默认禁止新装应用「后台弹出界面」，这会导致键盘上的设置、剪贴板编辑、语音授权等页面打不开。应用会提示你，并帮你跳到对应的权限页开启。
+- **Windows**：从 [Releases](https://github.com/Wlaina/Ifboard/releases) 下载 `Ifboard-Windows-Setup-<版本>.exe` 一键安装。内置小狼毫（Weasel `0.17.4`）、雾凇全拼/小鹤双拼、`wanxiang-lts-zh-hans.gram` 语法模型与 Warm Paper 桌面控制中心（详细说明见 [windows/README.md](windows/README.md)）。
 
-公开版默认使用雾凇拼音·全拼，小鹤双拼可以在方案选单里切换。
+公开版双端均默认使用雾凇拼音·全拼，小鹤双拼、模糊拼音及个人词频可通过控制中心或 WebDAV 同步自由切换与迁移。
 
 ## 功能
 
@@ -42,8 +41,8 @@ A personal build of Fcitx5 for Android: Rime with rime-ice (full pinyin / double
 - 剪贴板：文本与截图双列排布，最近的截图和复制的图片可以直接发送；分「最近 / 已固定」两区，最近区只保留一天内的内容，合计最多 20 条，一键清空未置顶条目时同步清理剪贴板截图（不删系统相册）。
 
 **同步与更新**
-- WebDAV 同步 Rime 用户词库，默认预置 **Koofr** 并支持 **Koofr / 坚果云** 一键切换，目录结构和电脑端小狼毫的 `sync/<设备号>` 一致，可以多设备合并。
-- 从 GitHub Release 检查 Ifboard 新版本。
+- WebDAV 同步 Rime 用户词库，默认预置 **Koofr** 并支持 **Koofr / 坚果云** 一键切换，目录结构和电脑端小狼毫（`Ifboard for Windows`）的 `sync/<设备号>` 一致，可以手机/电脑全端自动合并（并自动跳过 `_pc_profile` 等辅助目录）。
+- 从 GitHub Release 检查 Ifboard Android / Windows 新版本。
 
 **设置**：「暖纸 · 液态玻璃」风格圆角卡片界面，支持浅色/深色主题自适应，每个设置项均有中文说明。
 

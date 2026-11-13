@@ -106,3 +106,11 @@ lint/tmp/
 # Ifboard staged data (built from local files, may contain personal data)
 /app/src/main/jniLibs/
 /app/src/main/assets/ifboard/
+
+# Ifboard Windows build artifacts & large binaries
+/windows/dist/
+/windows/stage-public/
+/windows/installer-assets/
+/windows/IfboardWin/bin/
+/windows/IfboardWin/obj/
+*.gram

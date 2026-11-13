@@ -21,6 +21,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.fcitx.fcitx5.android.BuildConfig
 import org.fcitx.fcitx5.android.FcitxApplication
 import org.fcitx.fcitx5.android.daemon.FcitxDaemon
 import org.json.JSONObject
@@ -76,8 +77,13 @@ object GrammarModel {
     val busy get() = job?.isActive == true
 
     suspend fun fetchRemote(): Remote = withContext(Dispatchers.IO) {
-        val req = Request.Builder().url(API).header("Accept", "application/vnd.github+json").build()
+        val req = Request.Builder()
+            .url(API)
+            .header("User-Agent", "Ifboard-Android/${BuildConfig.VERSION_NAME}")
+            .header("Accept", "application/vnd.github+json")
+            .build()
         http.newCall(req).execute().use { resp ->
+            if (resp.code == 403 || resp.code == 429) error("GitHub API 访问受限（${resp.code}），请稍后再试")
             if (!resp.isSuccessful) error("无法访问 GitHub（${resp.code}）")
             val assets = JSONObject(resp.body!!.string()).getJSONArray("assets")
             for (i in 0 until assets.length()) {

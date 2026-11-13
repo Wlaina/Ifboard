@@ -1,0 +1,9 @@
+# 编译产物与大型二进制分发物
+IfboardWin/bin/
+IfboardWin/obj/
+IfboardWin/*.user
+dist/
+stage-public/
+installer-assets/
+*.exe
+!IfboardWin/Assets/*

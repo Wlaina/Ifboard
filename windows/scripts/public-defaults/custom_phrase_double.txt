@@ -1,0 +1,3 @@
+# Rime table
+# encoding: utf-8
+# 格式：词条<Tab>编码<Tab>权重（可自行追加常用短语）

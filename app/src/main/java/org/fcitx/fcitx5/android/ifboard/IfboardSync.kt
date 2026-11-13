@@ -65,8 +65,15 @@ object IfboardSync {
         private fun req(url: String) = Request.Builder().url(url).header("Authorization", Credentials.basic(user, pass))
 
         fun mkcol(path: String) {
-            http.newCall(req(root + path.trimEnd('/') + "/").method("MKCOL", null).build()).execute().use {
-                if (it.code == 401) error("账号或密码不对")
+            val clean = path.trim('/').ifEmpty { return }
+            var current = ""
+            for (seg in clean.split('/')) {
+                if (seg.isBlank()) continue
+                current = if (current.isEmpty()) seg else "$current/$seg"
+                http.newCall(req("$root$current/").method("MKCOL", null).build()).execute().use {
+                    if (it.code == 401) error("账号或密码不对")
+                    if (it.code !in 200..399 && it.code != 405) error("创建目录失败（${it.code}）")
+                }
             }
         }
 
@@ -155,19 +162,27 @@ object IfboardSync {
             dav.mkcol("$base/$id")
             // upload this device's snapshot
             val mine = File(rimeDir(ctx), "sync/$id")
-                .listFiles { f -> f.isFile && f.name.endsWith(".userdb.txt") && f.canRead() }
+                .listFiles { f -> f.isFile && f.name.endsWith(".userdb.txt") && f.canRead() && f.length() > 0L }
                 ?: emptyArray()
             mine.forEach { dav.put("$base/$id/${it.name}", it.readBytes()) }
-            // download other devices
+            // download other devices (skip internal metadata folders like _pc_profile)
             var down = 0
-            val devices = dav.list(base).filter { it.endsWith("/") }.map { it.trimEnd('/') }.filter { it != id }
+            val devices = dav.list(base)
+                .filter { it.endsWith("/") }
+                .map { it.trimEnd('/') }
+                .filter { it != id && !it.startsWith("_") && !it.startsWith(".") }
             devices.forEach { dev ->
                 dav.list("$base/$dev").filter { it.endsWith(".userdb.txt") }.forEach { name ->
-                    dav.get("$base/$dev/$name")?.let { bytes ->
+                    dav.get("$base/$dev/$name")?.takeIf { it.isNotEmpty() }?.let { bytes ->
                         val dirDev = File(rimeDir(ctx), "sync/$dev").apply { mkdirs() }
                         val target = File(dirDev, name)
+                        val tmp = File(dirDev, "$name.tmp")
+                        tmp.writeBytes(bytes)
                         if (target.exists() && !target.canWrite()) target.delete()
-                        target.writeBytes(bytes)
+                        if (!tmp.renameTo(target)) {
+                            target.writeBytes(bytes)
+                            tmp.delete()
+                        }
                         down++
                     }
                 }
@@ -181,10 +196,14 @@ object IfboardSync {
 
     /** newer release on GitHub, or null when up to date */
     suspend fun checkUpdate(): Release? = withContext(Dispatchers.IO) {
-        val req = Request.Builder().url("https://api.github.com/repos/$REPO/releases/latest")
-            .header("Accept", "application/vnd.github+json").build()
+        val req = Request.Builder()
+            .url("https://api.github.com/repos/$REPO/releases/latest")
+            .header("User-Agent", "Ifboard-Android/${BuildConfig.VERSION_NAME}")
+            .header("Accept", "application/vnd.github+json")
+            .build()
         http.newCall(req).execute().use { resp ->
             if (resp.code == 404) return@withContext null
+            if (resp.code == 403 || resp.code == 429) error("GitHub API 访问受限（${resp.code}），请稍后再试")
             if (!resp.isSuccessful) error("GitHub 访问失败（${resp.code}）")
             val j = JSONObject(resp.body!!.string())
             val tag = j.getString("tag_name").removePrefix("v")

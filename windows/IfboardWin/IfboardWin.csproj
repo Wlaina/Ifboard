@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\ifboard.ico</ApplicationIcon>
+    <AssemblyName>IfboardWin</AssemblyName>
+    <RootNamespace>IfboardWin</RootNamespace>
+    <Version>1.2.1</Version>
+    <Company>Ifboard</Company>
+    <Product>Ifboard for Windows</Product>
+    <Description>Ifboard 小狼毫控制中心（暖纸液态玻璃风格、WebDAV 同步、语法模型与动态系统皮肤）</Description>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+    <RetainVMGarbageCollection>false</RetainVMGarbageCollection>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Using Remove="System.Drawing" />
+    <Using Remove="System.Windows.Forms" />
+    <Resource Include="Assets\ifboard.ico" />
+    <Resource Include="Assets\ifboard_preview.png" />
+  </ItemGroup>
+
+</Project>

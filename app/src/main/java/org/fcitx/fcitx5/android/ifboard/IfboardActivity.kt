@@ -145,6 +145,7 @@ class IfboardFragment : PaddingPreferenceFragment() {
     private var syncNowPref: Preference? = null
     private var gramStatus: Preference? = null
     private var gramDelete: Preference? = null
+    private var syncing = false
 
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         val ctx = requireContext()
@@ -210,27 +211,33 @@ class IfboardFragment : PaddingPreferenceFragment() {
                 isIconSpaceReserved = false
                 summary = syncSummary(ctx, null)
                 setOnPreferenceClickListener {
+                    if (syncing) return@setOnPreferenceClickListener true
+                    syncing = true
                     summary = syncSummary(ctx, "正在同步…")
                     lifecycleScope.launch {
-                        runCatching {
-                            IfboardSync.webdavSync(
-                                ctx,
-                                sp.getString("ifb_webdav_url", IfboardSync.DEFAULT_WEBDAV_URL).orEmpty(),
-                                sp.getString("ifb_webdav_user", "").orEmpty(),
-                                sp.getString("ifb_webdav_password", "").orEmpty(),
-                                sp.getString("ifb_webdav_dir", "Ifboard").orEmpty()
-                            )
-                        }.onSuccess { r ->
-                            sp.edit().putLong("ifb_webdav_last", System.currentTimeMillis()).apply()
-                            Toast.makeText(
-                                ctx,
-                                "已同步：上传 ${r.uploaded} 个，合并 ${r.downloaded} 个（${r.devices.size} 台其他设备）",
-                                Toast.LENGTH_LONG
-                            ).show()
-                        }.onFailure {
-                            Toast.makeText(ctx, it.message ?: "同步失败", Toast.LENGTH_LONG).show()
+                        try {
+                            runCatching {
+                                IfboardSync.webdavSync(
+                                    ctx,
+                                    sp.getString("ifb_webdav_url", IfboardSync.DEFAULT_WEBDAV_URL).orEmpty(),
+                                    sp.getString("ifb_webdav_user", "").orEmpty(),
+                                    sp.getString("ifb_webdav_password", "").orEmpty(),
+                                    sp.getString("ifb_webdav_dir", "Ifboard").orEmpty()
+                                )
+                            }.onSuccess { r ->
+                                sp.edit().putLong("ifb_webdav_last", System.currentTimeMillis()).apply()
+                                Toast.makeText(
+                                    ctx,
+                                    "已同步：上传 ${r.uploaded} 个，合并 ${r.downloaded} 个（${r.devices.size} 台其他设备）",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }.onFailure {
+                                Toast.makeText(ctx, it.message ?: "同步失败", Toast.LENGTH_LONG).show()
+                            }
+                        } finally {
+                            syncing = false
+                            summary = syncSummary(ctx, null)
                         }
-                        summary = syncSummary(ctx, null)
                     }
                     true
                 }
