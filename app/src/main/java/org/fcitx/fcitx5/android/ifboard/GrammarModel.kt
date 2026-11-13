@@ -82,7 +82,7 @@ object GrammarModel {
             .header("User-Agent", "Ifboard-Android/${BuildConfig.VERSION_NAME}")
             .header("Accept", "application/vnd.github+json")
             .build()
-        http.newCall(req).execute().use { resp ->
+        IfboardSync.executeFriendly(http, req).use { resp ->
             if (resp.code == 403 || resp.code == 429) error("GitHub API 访问受限（${resp.code}），请稍后再试")
             if (!resp.isSuccessful) error("无法访问 GitHub（${resp.code}）")
             val assets = JSONObject(resp.body!!.string()).getJSONArray("assets")
@@ -158,7 +158,7 @@ object GrammarModel {
         _state.value = State.Downloading(done, r.size)
         if (done < r.size) {
             val req = Request.Builder().url(r.url).apply { if (done > 0) header("Range", "bytes=$done-") }.build()
-            http.newCall(req).execute().use { resp ->
+            IfboardSync.executeFriendly(http, req).use { resp ->
                 if (!resp.isSuccessful) error("下载失败（${resp.code}）")
                 // server ignored Range: start over
                 val append = done > 0 && resp.code == 206

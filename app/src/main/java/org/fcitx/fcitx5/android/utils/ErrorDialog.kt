@@ -11,6 +11,7 @@ import androidx.appcompat.app.AlertDialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.fcitx.fcitx5.android.R
+import org.fcitx.fcitx5.android.ui.common.WarmPaperUi
 
 suspend fun Context.importErrorDialog(message: String) {
     withContext(Dispatchers.Main.immediate) {
@@ -20,6 +21,7 @@ suspend fun Context.importErrorDialog(message: String) {
             .setPositiveButton(android.R.string.ok, null)
             .setIconAttribute(android.R.attr.alertDialogIcon)
             .show()
+            .also { WarmPaperUi.styleAlertDialog(it) }
     }
 }
 

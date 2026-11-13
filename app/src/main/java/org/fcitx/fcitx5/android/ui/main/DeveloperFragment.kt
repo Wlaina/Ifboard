@@ -20,6 +20,7 @@ import org.fcitx.fcitx5.android.daemon.FcitxDaemon
 import org.fcitx.fcitx5.android.data.clipboard.ClipboardManager
 import org.fcitx.fcitx5.android.data.prefs.AppPrefs
 import org.fcitx.fcitx5.android.ui.common.PaddingPreferenceFragment
+import org.fcitx.fcitx5.android.ui.common.showWarm
 import org.fcitx.fcitx5.android.ui.main.modified.MySwitchPreference
 import org.fcitx.fcitx5.android.utils.addPreference
 import org.fcitx.fcitx5.android.utils.iso8601UTCDateTime
@@ -100,7 +101,8 @@ class DeveloperFragment : PaddingPreferenceFragment() {
                             context.toast(R.string.done)
                         }
                     }
-                    .show()
+                    .create()
+                    .showWarm()
             }
             addPreference(R.string.delete_and_sync_data) {
                 AlertDialog.Builder(context)
@@ -115,7 +117,8 @@ class DeveloperFragment : PaddingPreferenceFragment() {
                         }
                     }
                     .setNegativeButton(android.R.string.cancel, null)
-                    .show()
+                    .create()
+                    .showWarm()
             }
             addPreference(R.string.clear_clb_db) {
                 AlertDialog.Builder(context)
@@ -130,7 +133,8 @@ class DeveloperFragment : PaddingPreferenceFragment() {
                         }
                     }
                     .setNegativeButton(android.R.string.cancel, null)
-                    .show()
+                    .create()
+                    .showWarm()
             }
             addPreference(R.string.capture_heap_dump) {
                 val fileName = "${context.packageName}_${iso8601UTCDateTime()}.hprof"

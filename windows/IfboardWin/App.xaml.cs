@@ -97,6 +97,13 @@ public partial class App : System.Windows.Application
     {
         base.OnStartup(e);
 
+        if (e.Args.Any(a => string.Equals(a, "--quit", StringComparison.OrdinalIgnoreCase)))
+        {
+            ForwardArgsToExistingInstance(e.Args);
+            Shutdown();
+            return;
+        }
+
         _singleMutex = new Mutex(true, MutexName, out var createdNew);
         if (!createdNew)
         {
@@ -314,8 +321,21 @@ public partial class App : System.Windows.Application
         Shutdown();
     }
 
+    protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
+    {
+        // 响应安装器 RestartManager 或系统注销/关机信号，立即清理托盘并退出进程
+        e.Cancel = false;
+        ExitApplication();
+        base.OnSessionEnding(e);
+    }
+
     private void ExecuteStartupCommand(string[] args)
     {
+        if (args.Any(a => string.Equals(a, "--quit", StringComparison.OrdinalIgnoreCase)))
+        {
+            ExitApplication();
+            return;
+        }
         if (args.Any(a => string.Equals(a, "--sync", StringComparison.OrdinalIgnoreCase)))
         {
             _ = RunTrayWebDavSyncAsync();
@@ -350,8 +370,11 @@ public partial class App : System.Windows.Application
         if (args.Any(a => string.Equals(a, "--tray", StringComparison.OrdinalIgnoreCase)))
             return;
 
+        var isQuit = args.Any(a => string.Equals(a, "--quit", StringComparison.OrdinalIgnoreCase));
         var cmd = "--show";
-        if (args.Any(a => string.Equals(a, "--sync", StringComparison.OrdinalIgnoreCase)))
+        if (isQuit)
+            cmd = "--quit";
+        else if (args.Any(a => string.Equals(a, "--sync", StringComparison.OrdinalIgnoreCase)))
             cmd = "--sync";
         else if (args.Any(a => string.Equals(a, "--theme-accent", StringComparison.OrdinalIgnoreCase)))
             cmd = "--theme-accent";
@@ -372,6 +395,7 @@ public partial class App : System.Windows.Application
         }
         catch
         {
+            if (isQuit) return;
             // 若 NamedPipe 繁忙或未就绪，回退到事件对象唤醒主窗口
         }
 

@@ -21,6 +21,7 @@ import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.data.theme.Theme
 import org.fcitx.fcitx5.android.data.theme.ThemeFilesManager
 import org.fcitx.fcitx5.android.data.theme.ThemeManager
+import org.fcitx.fcitx5.android.ui.common.showWarm
 import org.fcitx.fcitx5.android.ui.common.withLoadingDialog
 import org.fcitx.fcitx5.android.utils.applyNavBarInsetsBottomPadding
 import org.fcitx.fcitx5.android.utils.importErrorDialog
@@ -192,11 +193,12 @@ class ThemeListFragment : Fragment() {
                                 dialog.dismiss()
                             }
                         }
-                        dialog.show()
+                        dialog.showWarm()
                     }
                 }
             }
-            .show()
+            .create()
+            .showWarm()
     }
 
     private fun selectTheme(theme: Theme) {
@@ -214,7 +216,8 @@ class ThemeListFragment : Fragment() {
                         updateSelectedThemes()
                     }
                 }
-                .show()
+                .create()
+                .showWarm()
             return
         }
         ThemeManager.setNormalModeTheme(theme)

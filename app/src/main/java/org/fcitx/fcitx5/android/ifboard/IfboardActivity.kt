@@ -106,6 +106,26 @@ class IfboardActivity : AppCompatActivity() {
     }
 
     companion object {
+        private fun formatReleaseNotes(raw: String): String {
+            val cleaned = raw.lines().mapNotNull { line ->
+                val s = line.trimEnd()
+                val t = s.trim()
+                when {
+                    t.startsWith("### ") -> "【${t.removePrefix("### ").trim()}】"
+                    t.startsWith("## ") -> "【${t.removePrefix("## ").trim()}】"
+                    t.startsWith("# ") -> "【${t.removePrefix("# ").trim()}】"
+                    t == "---" || t == "***" -> null
+                    else -> s
+                        .replace(Regex("""\*\*(.+?)\*\*"""), "$1")
+                        .replace(Regex("""`([^`]+)`"""), "$1")
+                        .let { if (it.startsWith("- ")) "• " + it.removePrefix("- ") else it }
+                }
+            }.joinToString("\n")
+                .replace(Regex("\n{3,}"), "\n\n")
+                .trim()
+            return if (cleaned.length > 900) cleaned.take(900).trimEnd() + "\n..." else cleaned
+        }
+
         /** 检查 GitHub Releases 新版本 */
         fun checkUpdate(activity: AppCompatActivity, verbose: Boolean) {
             activity.lifecycleScope.launch {
@@ -117,7 +137,7 @@ class IfboardActivity : AppCompatActivity() {
                         }
                         AlertDialog.Builder(activity)
                             .setTitle("发现新版本 ${rel.version}")
-                            .setMessage(rel.notes.ifBlank { "有新版本可以更新。" })
+                            .setMessage(formatReleaseNotes(rel.notes).ifBlank { "有新版本可以更新。" })
                             .setPositiveButton("下载") { _, _ ->
                                 activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(rel.apkUrl ?: rel.url)))
                             }

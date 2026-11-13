@@ -1,5 +1,5 @@
 #define MyAppName "Ifboard for Windows"
-#define MyAppVersion "1.2.1"
+#define MyAppVersion "1.2.2"
 #define MyAppPublisher "Ifboard"
 #define MyAppURL "https://github.com/Wlaina/Ifboard"
 #define MyAppExeName "IfboardWin.exe"
@@ -29,6 +29,7 @@ Compression=lzma2/fast
 SolidCompression=yes
 WizardStyle=modern
 CloseApplications=force
+RestartApplications=no
 
 [Languages]
 Name: "default"; MessagesFile: "compiler:Default.isl"
@@ -74,8 +75,15 @@ procedure KillRunningProcesses();
 var
   ResultCode: Integer;
 begin
-  Exec('taskkill.exe', '/F /IM IfboardWin.exe /IM WeaselDeployer.exe /IM WeaselServer.exe /IM WeaselSetup.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Sleep(400);
+  Exec('taskkill.exe', '/F /T /IM IfboardWin.exe /IM WeaselDeployer.exe /IM WeaselServer.exe /IM WeaselSetup.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(600);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  // 在 Inno Setup RestartManager 检测文件占用之前先结束托盘与小狼毫进程，避免静默/覆盖升级弹出占用重试框
+  KillRunningProcesses();
+  Result := '';
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);

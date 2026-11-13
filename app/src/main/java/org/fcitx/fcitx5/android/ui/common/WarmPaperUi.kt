@@ -247,18 +247,36 @@ object WarmPaperUi {
         val thumbSize = dp(ctx, 18f)
         val padH = dp(ctx, 3f)
         val padV = dp(ctx, 4f)
+        val thumbStroke = if (androidx.core.graphics.ColorUtils.calculateLuminance(thumbColor) > 0.7) {
+            0x26000000
+        } else {
+            0x33FFFFFF
+        }
         val thumbCircle = android.graphics.drawable.GradientDrawable().apply {
             shape = android.graphics.drawable.GradientDrawable.OVAL
             setColor(thumbColor)
+            setStroke(maxOf(1, dp(ctx, 1f)), thumbStroke)
             setSize(thumbSize, thumbSize)
         }
-        val thumb = android.graphics.drawable.InsetDrawable(thumbCircle, padH, padV, padH, padV)
+        // Zero optical padding so SwitchCompat/Switch keep the track inset around the thumb
+        val thumb = object : android.graphics.drawable.DrawableWrapper(
+            android.graphics.drawable.InsetDrawable(thumbCircle, padH, padV, padH, padV)
+        ) {
+            override fun getPadding(padding: android.graphics.Rect): Boolean {
+                padding.set(0, 0, 0, 0)
+                return false
+            }
+        }
+        val minW = dp(ctx, 48f)
         when (sw) {
             is androidx.appcompat.widget.SwitchCompat -> {
                 sw.trackDrawable = track
                 sw.thumbDrawable = thumb
                 sw.trackTintList = null
                 sw.thumbTintList = null
+                sw.splitTrack = false
+                sw.thumbTextPadding = 0
+                sw.switchMinWidth = minW
                 sw.showText = false
             }
             is android.widget.Switch -> {
@@ -266,6 +284,9 @@ object WarmPaperUi {
                 sw.thumbDrawable = thumb
                 sw.trackTintList = null
                 sw.thumbTintList = null
+                sw.splitTrack = false
+                sw.thumbTextPadding = 0
+                sw.switchMinWidth = minW
                 sw.showText = false
             }
         }
@@ -322,6 +343,8 @@ object WarmPaperUi {
         }
         getButton(AlertDialog.BUTTON_POSITIVE)?.apply {
             val fill = if (destructive) p.error else p.brand
+            androidx.core.view.ViewCompat.setBackgroundTintList(this, null)
+            backgroundTintList = null
             background = pillRipple(context, fill)
             setTextColor(Color.WHITE)
             isAllCaps = false
@@ -331,6 +354,8 @@ object WarmPaperUi {
         }
         listOf(AlertDialog.BUTTON_NEGATIVE, AlertDialog.BUTTON_NEUTRAL).forEach { which ->
             getButton(which)?.apply {
+                androidx.core.view.ViewCompat.setBackgroundTintList(this, null)
+                backgroundTintList = null
                 background = pillRipple(context, p.surface, p.borderStrong, 1f)
                 setTextColor(p.textSecondary)
                 isAllCaps = false

@@ -17,6 +17,7 @@ object Bootstrap {
 
     fun run(ctx: Context) {
         val ext = ctx.getExternalFilesDir(null) ?: return
+        ensureSharedLunarDb(ctx, ext)
         val marker = File(ext, MARKER)
         val stamp = runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).lastUpdateTime.toString() }
             .getOrDefault("0")
@@ -32,6 +33,18 @@ object Bootstrap {
             }
             marker.writeText(stamp)
         }.onFailure { Timber.w(it, "Ifboard bootstrap failed") }
+    }
+
+    // lunar.lua uses ReverseDb("lua/lunar.db"), which librime resolves inside Rime's user data dir
+    private fun ensureSharedLunarDb(ctx: Context, ext: File) {
+        val target = File(ext, "data/rime/lua/lunar.db")
+        if (target.isFile && target.length() > 0) return
+        runCatching {
+            target.parentFile?.mkdirs()
+            ctx.assets.open("usr/share/rime-data/lua/lunar.db").use { input ->
+                target.outputStream().use { input.copyTo(it) }
+            }
+        }.onFailure { Timber.w(it, "Copy lunar.db failed") }
     }
 
     private fun copyTree(ctx: Context, assetPath: String, dest: File) {

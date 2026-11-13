@@ -46,6 +46,21 @@ object IfboardSync {
             ?.firstOrNull { it.trim().startsWith("installation_id:") }
             ?.substringAfter(":")?.trim()?.trim('"', '\'')
 
+    fun executeFriendly(client: OkHttpClient, req: Request): okhttp3.Response {
+        return try {
+            client.newCall(req).execute()
+        } catch (e: java.io.IOException) {
+            val msg = when (e) {
+                is java.net.UnknownHostException -> "网络无法连接或域名解析失败，请检查网络"
+                is java.net.SocketTimeoutException -> "连接超时，请稍后再试"
+                is javax.net.ssl.SSLException -> "安全连接（TLS）失败，请检查网络环境或系统时间"
+                is java.net.ConnectException -> "无法连接到服务器，请检查地址与网络"
+                else -> "网络请求失败：${e.localizedMessage ?: e.javaClass.simpleName}"
+            }
+            throw IllegalStateException(msg, e)
+        }
+    }
+
     /** Ask Rime to export this device's snapshot and merge the others (same as the keyboard's 同步) */
     suspend fun rimeSync() {
         runCatching {
@@ -70,7 +85,7 @@ object IfboardSync {
             for (seg in clean.split('/')) {
                 if (seg.isBlank()) continue
                 current = if (current.isEmpty()) seg else "$current/$seg"
-                http.newCall(req("$root$current/").method("MKCOL", null).build()).execute().use {
+                executeFriendly(http, req("$root$current/").method("MKCOL", null).build()).use {
                     if (it.code == 401) error("账号或密码不对")
                     if (it.code !in 200..399 && it.code != 405) error("创建目录失败（${it.code}）")
                 }
@@ -78,23 +93,24 @@ object IfboardSync {
         }
 
         fun put(path: String, bytes: ByteArray) {
-            http.newCall(req(root + path).put(bytes.toRequestBody("text/plain".toMediaType())).build()).execute().use {
+            executeFriendly(http, req(root + path).put(bytes.toRequestBody("text/plain".toMediaType())).build()).use {
                 if (it.code == 401) error("账号或密码不对")
                 if (!it.isSuccessful) error("上传失败（${it.code}）")
             }
         }
 
         fun get(path: String): ByteArray? =
-            http.newCall(req(root + path).get().build()).execute().use { if (it.isSuccessful) it.body?.bytes() else null }
+            executeFriendly(http, req(root + path).get().build()).use { if (it.isSuccessful) it.body?.bytes() else null }
 
         /** names of direct children; folders end with "/" */
         fun list(path: String): List<String> {
             val body = """<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>"""
             val clean = path.trim('/')
             val url = if (clean.isEmpty()) root else "$root$clean/"
-            http.newCall(
+            executeFriendly(
+                http,
                 req(url).header("Depth", "1").method("PROPFIND", body.toRequestBody("application/xml".toMediaType())).build()
-            ).execute().use { resp ->
+            ).use { resp ->
                 if (resp.code == 401) error("账号或密码不对")
                 if (!resp.isSuccessful) return emptyList()
                 val xml = resp.body?.string().orEmpty()
@@ -201,7 +217,7 @@ object IfboardSync {
             .header("User-Agent", "Ifboard-Android/${BuildConfig.VERSION_NAME}")
             .header("Accept", "application/vnd.github+json")
             .build()
-        http.newCall(req).execute().use { resp ->
+        executeFriendly(http, req).use { resp ->
             if (resp.code == 404) return@withContext null
             if (resp.code == 403 || resp.code == 429) error("GitHub API 访问受限（${resp.code}），请稍后再试")
             if (!resp.isSuccessful) error("GitHub 访问失败（${resp.code}）")

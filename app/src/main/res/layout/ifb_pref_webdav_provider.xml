@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical">
@@ -33,7 +34,9 @@
             android:layout_weight="1"
             android:clickable="true"
             android:focusable="true"
+            android:defaultFocusHighlightEnabled="false"
             android:gravity="center"
+            tools:targetApi="o"
             android:text="Koofr（默认）"
             android:textSize="13.5sp" />
 
@@ -45,7 +48,9 @@
             android:layout_weight="1"
             android:clickable="true"
             android:focusable="true"
+            android:defaultFocusHighlightEnabled="false"
             android:gravity="center"
+            tools:targetApi="o"
             android:text="坚果云"
             android:textSize="13.5sp" />
     </LinearLayout>

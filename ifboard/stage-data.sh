@@ -23,7 +23,8 @@ cp -r "$T"/assets/usr/share/* $A/usr/share/
 R=$A/usr/share/rime-data
 cp -r "$RIME_ICE_DIR"/cn_dicts "$RIME_ICE_DIR"/en_dicts "$RIME_ICE_DIR"/lua "$RIME_ICE_DIR"/opencc $R/
 cp "$RIME_ICE_DIR"/*.schema.yaml "$RIME_ICE_DIR"/*.dict.yaml "$RIME_ICE_DIR"/symbols_*.yaml \
-   "$RIME_ICE_DIR"/default.yaml "$RIME_ICE_DIR"/recipe.yaml $R/
+   "$RIME_ICE_DIR"/default.yaml "$R/"
+if [ -f "$RIME_ICE_DIR"/recipe.yaml ]; then cp "$RIME_ICE_DIR"/recipe.yaml "$R/"; fi
 # the grammar model is downloaded by the app; drop any copy left from older builds
 rm -f $R/*.gram
 # the full pinyin schema (雾凇拼音, default for new users) must always be there
