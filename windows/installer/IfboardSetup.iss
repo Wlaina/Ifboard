@@ -1,5 +1,5 @@
 #define MyAppName "Ifboard for Windows"
-#define MyAppVersion "1.2.2"
+#define MyAppVersion "1.2.7"
 #define MyAppPublisher "Ifboard"
 #define MyAppURL "https://github.com/Wlaina/Ifboard"
 #define MyAppExeName "IfboardWin.exe"

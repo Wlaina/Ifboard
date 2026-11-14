@@ -9,11 +9,12 @@ Warm Paper · Liquid Glass 风格的 Windows 小狼毫（Weasel `0.17.4`）一�
 - **双端一致的桌面外观与热换肤**：
   - 内置 **Claude 陶土橙（默认推荐）**、**跟随 Windows 系统主体色**、**暖纸琥珀** 三套浅色/深色双模小狼毫候选窗皮肤。
   - 支持后台超低功耗托盘模式（`--tray`），监听 Windows 11 系统取色与浅/深色切换并自动更新小狼毫皮肤。
-- **WebDAV 云端同步与一键迁机**：
-  - 兼容手机端 Ifboard `/Ifboard/<DeviceId>/*.userdb.txt` 结构，自动跳过 `_pc_profile` 等配置快照目录，手机/电脑全端词频打通合并。
+- **WebDAV 云端同步与每日自动同步**：
+  - 兼容手机端 Ifboard `/Ifboard/<DeviceId>/*.userdb.txt` 结构，自动跳过 `_pc_profile` / `_touch_model` 等辅助目录，手机/电脑全端词频打通合并，并支持默认开启的每 24 小时后台自动同步与云端触摸习惯统计展示。
   - 使用 Windows DPAPI 硬件级加密保存云盘密码；支持一键备份与还原电脑整套方案、模糊音、皮肤与短语。
-- **万象语法模型 LTS 在线升级**：
-  - 对接 `amzxyz/rime-wanxiang-data` 官方 `LTS` Release，支持版本检测、HTTP Range 断点续传、`Rime::Grammar/` 头与 SHA-256 校验及热替换部署。
+- **万象语法模型与控制中心对齐**：
+  - 对接 `amzxyz/rime-wanxiang-data` 官方 `LTS` Release，支持无限超时保护、后台托盘提醒与自动断点续传（GitHub 连不上时自动回退 CNB 国内镜像），并通过 `Rime::Grammar/` 头与 SHA-256 校验后热替换部署。
+  - 控制中心与 Android 端能力对齐，支持 `librime` 整句纠错开关（`translator/enable_correction`）与仅匹配 Windows `.exe` 安装包的 Release 检查更新。
 
 ## 目录结构
 
@@ -50,4 +51,4 @@ dotnet publish .\IfboardWin\IfboardWin.csproj -c Release -r win-x64 --self-conta
 & "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" .\installer\IfboardSetup.iss
 ```
 
-输出产物位于 `dist\Ifboard-Windows-Setup-1.2.1.exe`。
+输出产物位于 `dist\Ifboard-Windows-Setup-1.2.7.exe`。

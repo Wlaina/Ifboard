@@ -168,27 +168,59 @@ object GrammarModel {
         return r.sha256 != null && r.sha256 != digest
     }
 
+    private class FatalTransferException(message: String) : IllegalStateException(message)
+
+    private const val MAX_TRANSFER_ATTEMPTS = 6
+
+    private fun acquireKeepAliveLocks(ctx: Context): Pair<android.os.PowerManager.WakeLock?, android.net.wifi.WifiManager.WifiLock?> {
+        val wakeLock = runCatching {
+            val pm = ctx.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+            pm?.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "ifboard:grammar_dl")?.apply {
+                setReferenceCounted(false)
+                acquire(45 * 60_000L)
+            }
+        }.getOrNull()
+        @Suppress("DEPRECATION")
+        val wifiLock = runCatching {
+            val wm = ctx.applicationContext.getSystemService(Context.WIFI_SERVICE) as? android.net.wifi.WifiManager
+            wm?.createWifiLock(android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF, "ifboard:grammar_wifi")?.apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        }.getOrNull()
+        return wakeLock to wifiLock
+    }
+
     /**
-     * Download (or update) in the application scope, so it keeps going when the page is closed.
-     * An interrupted download resumes from the .part file. Progress is reported through [state].
+     * Download (or update) in the application scope, protected by a foreground service + WakeLock/WifiLock
+     * so switching apps or turning off the screen won't drop the socket.
+     * An interrupted download resumes automatically via Range requests.
      */
     fun start(ctx: Context) {
         if (busy) return
         val app = ctx.applicationContext
+        GrammarDownloadService.start(app)
         job = FcitxApplication.getInstance().coroutineScope.launch {
-            // the application scope runs on the main thread, so toasts are fine here
-            runCatching { download(app) }
-                .onSuccess {
-                    if (!isActive) return@onSuccess
-                    _state.value = State.Done
-                    android.widget.Toast.makeText(app, "语法模型已就绪", android.widget.Toast.LENGTH_SHORT).show()
-                }
-                .onFailure {
-                    if (it is kotlinx.coroutines.CancellationException) return@onFailure
-                    Timber.w(it, "grammar model download failed")
-                    _state.value = State.Failed(it.message ?: it.javaClass.simpleName)
-                    android.widget.Toast.makeText(app, "语法模型下载失败：${it.message}", android.widget.Toast.LENGTH_LONG).show()
-                }
+            val (wakeLock, wifiLock) = acquireKeepAliveLocks(app)
+            try {
+                // the application scope runs on the main thread, so toasts are fine here
+                runCatching { download(app) }
+                    .onSuccess {
+                        if (!isActive) return@onSuccess
+                        _state.value = State.Done
+                        android.widget.Toast.makeText(app, "语法模型已就绪", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                    .onFailure {
+                        if (it is kotlinx.coroutines.CancellationException) return@onFailure
+                        Timber.w(it, "grammar model download failed")
+                        _state.value = State.Failed(it.message ?: it.javaClass.simpleName)
+                        android.widget.Toast.makeText(app, "语法模型下载失败：${it.message}", android.widget.Toast.LENGTH_LONG).show()
+                    }
+            } finally {
+                runCatching { if (wakeLock?.isHeld == true) wakeLock.release() }
+                runCatching { if (wifiLock?.isHeld == true) wifiLock.release() }
+                GrammarDownloadService.stop(app)
+            }
         }
     }
 
@@ -224,45 +256,77 @@ object GrammarModel {
         if (part.length() > r.size) part.delete()
 
         val need = r.size - part.length() + 16L * 1024 * 1024
-        if (dir.usableSpace < need) error("手机剩余空间不足，需要约 ${need / 1024 / 1024} MB")
+        if (dir.usableSpace < need) throw FatalTransferException("手机剩余空间不足，需要约 ${need / 1024 / 1024} MB")
 
-        var done = part.length()
-        _state.value = State.Downloading(done, r.size)
-        if (done < r.size) {
-            val req = Request.Builder().url(r.url).apply { if (done > 0) header("Range", "bytes=$done-") }.build()
-            IfboardSync.executeFriendly(http, req).use { resp ->
-                if (!resp.isSuccessful) error("下载失败（${resp.code}）")
-                // server ignored Range: start over
-                val append = done > 0 && resp.code == 206
-                if (!append) done = 0
-                val body = resp.body ?: error("下载失败：没有内容")
-                FileOutputStream(part, append).use { out ->
-                    val buf = ByteArray(256 * 1024)
-                    val input = body.byteStream()
-                    var last = 0L
-                    while (isActive) {
-                        val n = input.read(buf)
-                        if (n < 0) break
-                        out.write(buf, 0, n)
-                        done += n
-                        if (done - last >= 1024 * 1024) {
-                            last = done
-                            _state.value = State.Downloading(done, r.size)
+        var attempt = 0
+        var lastError: Throwable? = null
+        while (attempt < MAX_TRANSFER_ATTEMPTS && isActive) {
+            attempt++
+            var done = part.length()
+            _state.value = State.Downloading(done, r.size)
+            if (done >= r.size) break
+            try {
+                val req = Request.Builder().url(r.url).apply { if (done > 0) header("Range", "bytes=$done-") }.build()
+                IfboardSync.executeFriendly(http, req).use { resp ->
+                    if (resp.code == 416 && part.length() >= r.size) {
+                        return@use
+                    }
+                    if (!resp.isSuccessful) {
+                        val msg = "下载失败（${resp.code}）"
+                        if (resp.code in 400..499 && resp.code != 408 && resp.code != 429) {
+                            throw FatalTransferException(msg)
                         }
+                        error(msg)
+                    }
+                    // server ignored Range: start over
+                    val append = done > 0 && resp.code == 206
+                    if (!append) done = 0
+                    val body = resp.body ?: error("下载失败：没有内容")
+                    FileOutputStream(part, append).use { out ->
+                        val buf = ByteArray(256 * 1024)
+                        val input = body.byteStream()
+                        var lastUi = 0L
+                        var lastFlush = 0L
+                        while (isActive) {
+                            val n = input.read(buf)
+                            if (n < 0) break
+                            out.write(buf, 0, n)
+                            done += n
+                            if (done - lastFlush >= 2 * 1024 * 1024) {
+                                out.flush()
+                                lastFlush = done
+                            }
+                            if (done - lastUi >= 1024 * 1024) {
+                                lastUi = done
+                                _state.value = State.Downloading(done, r.size)
+                            }
+                        }
+                        out.flush()
                     }
                 }
+                if (part.length() >= r.size || !isActive) break
+                error("连接提前断开，准备自动续传")
+            } catch (e: Throwable) {
+                if (e is kotlinx.coroutines.CancellationException || e is FatalTransferException) throw e
+                lastError = e
+                Timber.w(e, "grammar transfer attempt $attempt/$MAX_TRANSFER_ATTEMPTS failed at ${part.length()}/${r.size}")
+                if (attempt >= MAX_TRANSFER_ATTEMPTS) break
+                kotlinx.coroutines.delay(1500L * attempt)
             }
         }
         if (!isActive) return@withContext
-        if (part.length() != r.size) error("下载不完整，请重试（会接着上次的进度）")
+        if (part.length() != r.size) {
+            val detail = lastError?.message?.let { "（$it）" }.orEmpty()
+            error("下载不完整$detail，请重试（已保留 ${mb(part.length())} 断点进度）")
+        }
 
         _state.value = State.Verifying
         if (!part.inputStream().use { s -> ByteArray(MAGIC.length).also { s.read(it) } }.decodeToString().startsWith(MAGIC)) {
-            part.delete(); error("文件格式不对，已删除")
+            part.delete(); throw FatalTransferException("文件格式不对，已删除")
         }
         val sha = sha256(part)
         if (r.sha256 != null && sha != r.sha256) {
-            part.delete(); error("校验失败（sha256 不一致），已删除，请重试")
+            part.delete(); throw FatalTransferException("校验失败（sha256 不一致），已删除，请重试")
         }
         // rename(2) replaces the old file atomically; a running Rime keeps its mapping of the old one
         val target = file(ctx)

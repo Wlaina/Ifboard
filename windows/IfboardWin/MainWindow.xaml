@@ -313,6 +313,22 @@
                                                 Margin="0,0,0,6"
                                                 Click="BackupProfile_Click" />
                                     </WrapPanel>
+
+                                    <Border Style="{StaticResource CardDividerStyle}" />
+
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="每日自动云端同步（间隔 24 小时）" Style="{StaticResource RowTitleStyle}" />
+                                            <TextBlock Text="驻留托盘期间每 24 小时静默同步一次各设备 Rime 词频与手机触摸习惯（与手机端每日自动同步一致）。"
+                                                       Style="{StaticResource RowDescStyle}" />
+                                        </StackPanel>
+                                        <CheckBox x:Name="DailyAutoSyncCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
+                                                  Checked="AppOptionCheck_Changed" Unchecked="AppOptionCheck_Changed" />
+                                    </Grid>
                                 </StackPanel>
                             </Border>
 
@@ -529,6 +545,22 @@
                                                        Style="{StaticResource RowDescStyle}" />
                                         </StackPanel>
                                         <CheckBox x:Name="TabPageFlipCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
+                                                  Checked="InputControl_Changed" Unchecked="InputControl_Changed" />
+                                    </Grid>
+
+                                    <Border Style="{StaticResource CardDividerStyle}" />
+
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="启用 Rime 拼写容错纠错（enable_correction）" Style="{StaticResource RowTitleStyle}" />
+                                            <TextBlock Text="自动修正快打时常见的邻键误触与键序错位，与 Android 端拼写容错行为保持一致（需重新部署生效）。"
+                                                       Style="{StaticResource RowDescStyle}" />
+                                        </StackPanel>
+                                        <CheckBox x:Name="EnableCorrectionCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
                                                   Checked="InputControl_Changed" Unchecked="InputControl_Changed" />
                                     </Grid>
 
@@ -823,7 +855,7 @@
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
                                         <StackPanel>
-                                            <TextBlock Text="Ifboard for Windows（公开版 v1.2.1）" FontSize="15" FontWeight="Bold" />
+                                            <TextBlock x:Name="AboutTitleText" Text="Ifboard for Windows" FontSize="15" FontWeight="Bold" />
                                             <TextBlock x:Name="AppUpdateInfoText"
                                                        Text="暖纸液态玻璃桌面控制中心 · 已完整打包小狼毫 0.17.4、雾凇拼音、小鹤双拼与万象语法模型生态。"
                                                        Style="{StaticResource RowDescStyle}" Margin="0,4,12,0" />
@@ -836,6 +868,22 @@
                                                     Content="GitHub 主页"
                                                     Click="OpenGithub_Click" />
                                         </StackPanel>
+                                    </Grid>
+
+                                    <Border Style="{StaticResource CardDividerStyle}" />
+
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="启动时自动检查 Windows 端新版本（仅匹配 .exe 安装包）" Style="{StaticResource RowTitleStyle}" />
+                                            <TextBlock Text="检查 GitHub Release 时自动跳过仅含 Android APK 的版本，避免桌面端收到移动端更新提示。"
+                                                       Style="{StaticResource RowDescStyle}" />
+                                        </StackPanel>
+                                        <CheckBox x:Name="AutoCheckUpdateCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
+                                                  Checked="AppOptionCheck_Changed" Unchecked="AppOptionCheck_Changed" />
                                     </Grid>
 
                                     <Border Style="{StaticResource CardDividerStyle}" />

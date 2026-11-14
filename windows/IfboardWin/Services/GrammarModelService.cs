@@ -17,8 +17,16 @@ public static class GrammarModelService
     public const string DirectFallbackUrl =
         "https://github.com/amzxyz/rime-wanxiang-data/releases/download/LTS/wanxiang-lts-zh-hans.gram";
 
+    private const string CnbWebBase = "https://cnb.cool";
+
+    public const string CnbReleaseApiUrl =
+        "https://cnb.cool/amzxyz/rime-wanxiang/-/releases/tags/model";
+
     private const string ModelFileName = "wanxiang-lts-zh-hans.gram";
     private const string HeaderMagic = "Rime::Grammar/";
+    private const int MaxTransferAttempts = 6;
+    private const int ReadStallTimeoutMs = 30_000;
+    private const int MetadataTimeoutMs = 15_000;
 
     private static readonly HttpClient Http = CreateHttpClient();
 
@@ -30,10 +38,10 @@ public static class GrammarModelService
         };
         var client = new HttpClient(handler)
         {
-            Timeout = TimeSpan.FromMinutes(20)
+            // 大文件流式传输改为每次 ReadAsync 独立超时，避免慢速网络超过固定总时长被 HttpClient 强行掐断
+            Timeout = Timeout.InfiniteTimeSpan
         };
         client.DefaultRequestHeaders.UserAgent.ParseAdd(Paths.UserAgent);
-        client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
         return client;
     }
 
@@ -68,10 +76,43 @@ public static class GrammarModelService
 
     public static async Task<GrammarRemoteInfo> FetchRemoteInfoAsync(CancellationToken ct = default)
     {
+        try
+        {
+            return await FetchGithubRemoteInfoAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ghEx)
+        {
+            try
+            {
+                return await FetchCnbRemoteInfoAsync(ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception cnbEx)
+            {
+                throw new HttpRequestException($"GitHub 与 CNB 国内镜像均暂不可达（{ghEx.Message}；{cnbEx.Message}）", cnbEx);
+            }
+        }
+    }
+
+    private static async Task<GrammarRemoteInfo> FetchGithubRemoteInfoAsync(CancellationToken ct)
+    {
+        using var reqCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        reqCts.CancelAfter(MetadataTimeoutMs);
+
+        using var req = new HttpRequestMessage(HttpMethod.Get, ReleaseApiUrl);
+        req.Headers.Accept.ParseAdd("application/vnd.github+json");
+
         HttpResponseMessage resp;
         try
         {
-            resp = await Http.GetAsync(ReleaseApiUrl, ct);
+            resp = await Http.SendAsync(req, HttpCompletionOption.ResponseContentRead, reqCts.Token);
         }
         catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
         {
@@ -88,14 +129,13 @@ public static class GrammarModelService
             {
                 var code = (int)resp.StatusCode;
                 if (resp.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests)
-                    throw new HttpRequestException($"GitHub API 访问受限（HTTP {code}），请稍后再试或直接点击下载（将走直链断点下载）。", null, resp.StatusCode);
+                    throw new HttpRequestException($"GitHub API 访问受限（HTTP {code}）。", null, resp.StatusCode);
                 if (resp.StatusCode == HttpStatusCode.NotFound)
                     throw new HttpRequestException("未找到 amzxyz/rime-wanxiang-data LTS Release 页面（HTTP 404）。", null, resp.StatusCode);
-                throw new HttpRequestException($"查询云端语法模型失败（HTTP {code} {resp.ReasonPhrase}）。", null, resp.StatusCode);
+                throw new HttpRequestException($"查询 GitHub 语法模型失败（HTTP {code} {resp.ReasonPhrase}）。", null, resp.StatusCode);
             }
 
-            var body = await resp.Content.ReadAsStringAsync(ct);
-
+            var body = await resp.Content.ReadAsStringAsync(reqCts.Token);
             using var doc = JsonDocument.Parse(body);
             if (!doc.RootElement.TryGetProperty("assets", out var assets) || assets.ValueKind != JsonValueKind.Array)
                 throw new InvalidOperationException("GitHub Release 返回中未找到 assets 字段。");
@@ -117,11 +157,61 @@ public static class GrammarModelService
                         sha256 = raw["sha256:".Length..].Trim().ToLowerInvariant();
                 }
 
-                return new GrammarRemoteInfo(url, size, sha256, updatedAt);
+                return new GrammarRemoteInfo(url, size, sha256, updatedAt, "GitHub");
             }
 
             throw new InvalidOperationException($"未在 amzxyz/rime-wanxiang-data LTS 中找到 {ModelFileName}。");
         }
+    }
+
+    private static async Task<GrammarRemoteInfo> FetchCnbRemoteInfoAsync(CancellationToken ct)
+    {
+        using var reqCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        reqCts.CancelAfter(MetadataTimeoutMs);
+
+        using var req = new HttpRequestMessage(HttpMethod.Get, CnbReleaseApiUrl);
+        req.Headers.Accept.ParseAdd("application/vnd.cnb.web+json");
+
+        using var resp = await Http.SendAsync(req, HttpCompletionOption.ResponseContentRead, reqCts.Token);
+        if (!resp.IsSuccessStatusCode)
+            throw new HttpRequestException($"CNB 国内镜像返回 HTTP {(int)resp.StatusCode}", null, resp.StatusCode);
+
+        var body = await resp.Content.ReadAsStringAsync(reqCts.Token);
+        using var doc = JsonDocument.Parse(body);
+        if (!doc.RootElement.TryGetProperty("release", out var release) ||
+            !release.TryGetProperty("assets", out var assets) ||
+            assets.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidOperationException("CNB 镜像返回中未找到 release.assets 字段。");
+        }
+
+        foreach (var asset in assets.EnumerateArray())
+        {
+            var name = asset.TryGetProperty("name", out var n) ? n.GetString() : null;
+            if (!string.Equals(name, ModelFileName, StringComparison.Ordinal))
+                continue;
+
+            var path = asset.TryGetProperty("path", out var p) ? p.GetString() : null;
+            if (string.IsNullOrWhiteSpace(path)) continue;
+            var url = path.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? path : CnbWebBase + path;
+            var size = asset.TryGetProperty("size_in_byte", out var sb)
+                ? sb.GetInt64()
+                : (asset.TryGetProperty("size", out var sz) ? sz.GetInt64() : 0L);
+            var updatedAt = asset.TryGetProperty("updated_at", out var upd) ? (upd.GetString() ?? "") : "";
+            string? sha256 = null;
+            if (asset.TryGetProperty("hash_algo", out var algo) &&
+                string.Equals(algo.GetString(), "sha256", StringComparison.OrdinalIgnoreCase) &&
+                asset.TryGetProperty("hash_value", out var hv))
+            {
+                var raw = hv.GetString()?.Trim().ToLowerInvariant();
+                if (!string.IsNullOrEmpty(raw) && raw.Length == 64)
+                    sha256 = raw;
+            }
+
+            return new GrammarRemoteInfo(url, size, sha256, updatedAt, "CNB 国内镜像");
+        }
+
+        throw new InvalidOperationException($"CNB 国内镜像中未找到 {ModelFileName}。");
     }
 
     public static bool HasUpdateAvailable(GrammarRemoteInfo remote)
@@ -167,75 +257,7 @@ public static class GrammarModelService
         if (!string.IsNullOrEmpty(remoteTag))
             File.WriteAllText(partTagPath, remoteTag, new UTF8Encoding(false));
 
-        long existingBytes = File.Exists(partPath) ? new FileInfo(partPath).Length : 0L;
-        if (info.SizeBytes > 0 && existingBytes > info.SizeBytes)
-        {
-            File.Delete(partPath);
-            existingBytes = 0L;
-        }
-
-        using var req = new HttpRequestMessage(HttpMethod.Get, info.DownloadUrl);
-        if (existingBytes > 0)
-            req.Headers.Range = new RangeHeaderValue(existingBytes, null);
-
-        using var resp = await Http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
-        if (resp.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable)
-        {
-            // 若已完整位于 .part，则直接进入校验阶段
-            if (existingBytes == 0)
-                throw new InvalidOperationException("服务器返回 Range 无效，请删除缓存后重试。");
-        }
-        else
-        {
-            resp.EnsureSuccessStatusCode();
-            var append = resp.StatusCode == HttpStatusCode.PartialContent && existingBytes > 0;
-            if (!append) existingBytes = 0;
-
-            var contentLen = resp.Content.Headers.ContentLength ?? 0L;
-            var totalBytes = info.SizeBytes > 0
-                ? info.SizeBytes
-                : (contentLen > 0 ? existingBytes + contentLen : 0L);
-
-            await using var src = await resp.Content.ReadAsStreamAsync(ct);
-            await using var dst = new FileStream(
-                partPath,
-                append ? FileMode.Append : FileMode.Create,
-                FileAccess.Write,
-                FileShare.None,
-                bufferSize: 131072,
-                useAsync: true
-            );
-
-            var buf = new byte[131072];
-            long written = existingBytes;
-            var sw = System.Diagnostics.Stopwatch.StartNew();
-            long lastReportMs = 0;
-            long bytesSinceSample = 0;
-            double speed = 0;
-
-            progress?.Report((written, totalBytes, 0, "正在下载万象语法模型（支持断点续传）..."));
-
-            while (true)
-            {
-                var n = await src.ReadAsync(buf.AsMemory(0, buf.Length), ct);
-                if (n <= 0) break;
-                await dst.WriteAsync(buf.AsMemory(0, n), ct);
-                written += n;
-                bytesSinceSample += n;
-
-                var elapsedMs = sw.ElapsedMilliseconds;
-                if (elapsedMs - lastReportMs >= 250)
-                {
-                    var dt = (elapsedMs - lastReportMs) / 1000.0;
-                    if (dt > 0) speed = bytesSinceSample / dt;
-                    lastReportMs = elapsedMs;
-                    bytesSinceSample = 0;
-                    progress?.Report((written, totalBytes, speed, "正在下载万象语法模型（支持断点续传）..."));
-                }
-            }
-
-            await dst.FlushAsync(ct);
-        }
+        info = await TransferWithRetryAsync(info, partPath, partTagPath, progress, ct);
 
         var partSize = new FileInfo(partPath).Length;
         var verifyTotal = info.SizeBytes > 0 ? info.SizeBytes : partSize;
@@ -298,6 +320,156 @@ public static class GrammarModelService
             await RimeProcessService.EnsureWeaselServerRunningAsync();
         }
         await RimeProcessService.DeployAsync();
+    }
+
+    private static async Task<GrammarRemoteInfo> TransferWithRetryAsync(
+        GrammarRemoteInfo info,
+        string partPath,
+        string partTagPath,
+        IProgress<(long Downloaded, long Total, double BytesPerSec, string Stage)>? progress,
+        CancellationToken ct)
+    {
+        Exception? lastErr = null;
+        for (int attempt = 1; attempt <= MaxTransferAttempts; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            long existingBytes = File.Exists(partPath) ? new FileInfo(partPath).Length : 0L;
+            if (info.SizeBytes > 0 && existingBytes > info.SizeBytes)
+            {
+                File.Delete(partPath);
+                existingBytes = 0L;
+            }
+            if (info.SizeBytes > 0 && existingBytes == info.SizeBytes)
+                return info;
+
+            try
+            {
+                using var hdrCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                hdrCts.CancelAfter(ReadStallTimeoutMs);
+
+                using var req = new HttpRequestMessage(HttpMethod.Get, info.DownloadUrl);
+                if (existingBytes > 0)
+                    req.Headers.Range = new RangeHeaderValue(existingBytes, null);
+
+                using var resp = await Http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, hdrCts.Token);
+                if (resp.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable)
+                {
+                    if (existingBytes == 0)
+                        throw new InvalidOperationException("服务器返回 Range 无效，请删除缓存后重试。");
+                    return info;
+                }
+
+                resp.EnsureSuccessStatusCode();
+                var append = resp.StatusCode == HttpStatusCode.PartialContent && existingBytes > 0;
+                if (!append) existingBytes = 0;
+
+                var contentLen = resp.Content.Headers.ContentLength ?? 0L;
+                var totalBytes = info.SizeBytes > 0
+                    ? info.SizeBytes
+                    : (contentLen > 0 ? existingBytes + contentLen : 0L);
+
+                await using var src = await resp.Content.ReadAsStreamAsync(ct);
+                await using var dst = new FileStream(
+                    partPath,
+                    append ? FileMode.Append : FileMode.Create,
+                    FileAccess.Write,
+                    FileShare.None,
+                    bufferSize: 131072,
+                    useAsync: true
+                );
+
+                var buf = new byte[131072];
+                long written = existingBytes;
+                long unflushed = 0;
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                long lastReportMs = 0;
+                long bytesSinceSample = 0;
+                double speed = 0;
+
+                progress?.Report((written, totalBytes, 0, $"正在从 {info.Source} 下载万象语法模型..."));
+
+                while (true)
+                {
+                    using var readCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    readCts.CancelAfter(ReadStallTimeoutMs);
+                    int n;
+                    try
+                    {
+                        n = await src.ReadAsync(buf.AsMemory(0, buf.Length), readCts.Token);
+                    }
+                    catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
+                    {
+                        throw new IOException("网络读取超时，准备自动断点续传。", ex);
+                    }
+
+                    if (n <= 0) break;
+                    await dst.WriteAsync(buf.AsMemory(0, n), ct);
+                    written += n;
+                    unflushed += n;
+                    bytesSinceSample += n;
+
+                    if (unflushed >= 2 * 1024 * 1024)
+                    {
+                        await dst.FlushAsync(ct);
+                        unflushed = 0;
+                    }
+
+                    var elapsedMs = sw.ElapsedMilliseconds;
+                    if (elapsedMs - lastReportMs >= 250)
+                    {
+                        var dt = (elapsedMs - lastReportMs) / 1000.0;
+                        if (dt > 0) speed = bytesSinceSample / dt;
+                        lastReportMs = elapsedMs;
+                        bytesSinceSample = 0;
+                        progress?.Report((written, totalBytes, speed, $"正在从 {info.Source} 下载万象语法模型..."));
+                    }
+                }
+
+                await dst.FlushAsync(ct);
+                return info;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                lastErr = ex;
+                if (!string.Equals(info.Source, "CNB 国内镜像", StringComparison.Ordinal) && attempt >= 2)
+                {
+                    try
+                    {
+                        var cnb = await FetchCnbRemoteInfoAsync(ct);
+                        var canReuse = string.IsNullOrEmpty(info.Sha256) ||
+                                       string.IsNullOrEmpty(cnb.Sha256) ||
+                                       string.Equals(info.Sha256, cnb.Sha256, StringComparison.OrdinalIgnoreCase);
+                        if (!canReuse && File.Exists(partPath))
+                            File.Delete(partPath);
+                        var tag = !string.IsNullOrEmpty(cnb.Sha256) ? cnb.Sha256 : cnb.UpdatedAt;
+                        if (!string.IsNullOrEmpty(tag))
+                            File.WriteAllText(partTagPath, tag, new UTF8Encoding(false));
+                        info = cnb;
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch
+                    {
+                        // CNB 备选拉取失败则继续在当前镜像上退避重试
+                    }
+                }
+
+                if (attempt >= MaxTransferAttempts)
+                    break;
+
+                long curBytes = File.Exists(partPath) ? new FileInfo(partPath).Length : 0L;
+                progress?.Report((curBytes, info.SizeBytes, 0, $"连接中断，即将自动断点续传（第 {attempt}/{MaxTransferAttempts - 1} 次重试）..."));
+                await Task.Delay(Math.Min(1500 * attempt, 5000), ct);
+            }
+        }
+
+        throw new IOException($"下载中断次数过多（已保留 .part 断点缓存）：{lastErr?.Message}", lastErr);
     }
 
     private static async Task<GrammarRemoteInfo> TryFetchOrFallbackAsync(CancellationToken ct)

@@ -64,9 +64,12 @@ class FlexboxExpandedCandidateWindow :
                 addOnScrollListener(object : RecyclerView.OnScrollListener() {
                     override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
                         this@FlexboxExpandedCandidateWindow.layoutManager.apply {
-                            pageUpBtn.isEnabled = findFirstCompletelyVisibleItemPosition() > 0
-                            pageDnBtn.isEnabled =
-                                findLastCompletelyVisibleItemPosition() < itemCount - 1
+                            val canUp = findFirstCompletelyVisibleItemPosition() > 0
+                            val canDn = findLastCompletelyVisibleItemPosition() < itemCount - 1
+                            pageUpBtn.isEnabled = canUp
+                            pageUpBtn.alpha = if (canUp) 1f else 0.32f
+                            pageDnBtn.isEnabled = canDn
+                            pageDnBtn.alpha = if (canDn) 1f else 0.32f
                         }
                     }
                 })

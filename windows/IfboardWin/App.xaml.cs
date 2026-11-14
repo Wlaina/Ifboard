@@ -91,6 +91,7 @@ public partial class App : System.Windows.Application
     private MainWindow? _mainWindow;
     private CancellationTokenSource? _themeDebounceCts;
     private CancellationTokenSource? _trimCts;
+    private DispatcherTimer? _autoBgTimer;
     private bool _isExplicitExit;
 
     protected override void OnStartup(StartupEventArgs e)
@@ -135,6 +136,7 @@ public partial class App : System.Windows.Application
         ConfigureJumpList();
         InitializeTrayIcon();
         SystemEvents.UserPreferenceChanged += OnSystemPreferenceChanged;
+        StartBackgroundMaintenance();
 
         var startInTray = e.Args.Any(a => string.Equals(a, "--tray", StringComparison.OrdinalIgnoreCase));
         if (startInTray)
@@ -164,7 +166,7 @@ public partial class App : System.Windows.Application
                 {
                     args.Cancel = true;
                     win.Hide();
-                    ScheduleTrayTrim(aggressive: false, delayMs: 250);
+                    ShowTrayNotification("Ifboard 后台运行中", "当前任务将在后台继续执行，完成后将通过托盘通知您。");
                 }
             };
             win.Closed += (_, _) =>
@@ -249,9 +251,12 @@ public partial class App : System.Windows.Application
                 await Task.Delay(delayMs, cts.Token);
                 if (_isExplicitExit) return;
 
-                var hasVisibleWindow = await Dispatcher.InvokeAsync(() =>
-                    _mainWindow is { IsVisible: true } || _trayMenu is { IsOpen: true });
-                if (!hasVisibleWindow)
+                var hasVisibleOrBusy = await Dispatcher.InvokeAsync(() =>
+                    _mainWindow is { IsVisible: true } ||
+                    _mainWindow is { IsOperationBusy: true } ||
+                    _trayMenu is { IsOpen: true } ||
+                    OperationGate.CurrentCount == 0);
+                if (!hasVisibleOrBusy)
                     TrimTrayMemory(aggressive);
             }
             catch (OperationCanceledException)
@@ -290,6 +295,8 @@ public partial class App : System.Windows.Application
     public void ExitApplication()
     {
         _isExplicitExit = true;
+        _autoBgTimer?.Stop();
+        _autoBgTimer = null;
         SystemEvents.UserPreferenceChanged -= OnSystemPreferenceChanged;
         _themeDebounceCts?.Cancel();
         _trimCts?.Cancel();
@@ -655,6 +662,95 @@ public partial class App : System.Windows.Application
         catch
         {
             return (1.0, 1.0);
+        }
+    }
+
+    public void ShowTrayNotification(string title, string message, bool isError = false)
+    {
+        if (_isExplicitExit) return;
+        Dispatcher.BeginInvoke(() =>
+        {
+            _trayIcon?.ShowBalloonTip(
+                isError ? 4000 : 3000,
+                title,
+                message,
+                isError ? WinForms.ToolTipIcon.Error : WinForms.ToolTipIcon.Info
+            );
+        });
+    }
+
+    private void StartBackgroundMaintenance()
+    {
+        _autoBgTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(30) };
+        _autoBgTimer.Tick += (_, _) => _ = TryAutoDailySyncAsync();
+        _autoBgTimer.Start();
+        _ = RunInitialBackgroundChecksAsync();
+    }
+
+    private async Task RunInitialBackgroundChecksAsync()
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(25));
+            if (_isExplicitExit) return;
+            await StartupCheckUpdateAsync();
+            await TryAutoDailySyncAsync();
+        }
+        catch
+        {
+            // 启动后台检查异常静默容错
+        }
+    }
+
+    private async Task StartupCheckUpdateAsync()
+    {
+        try
+        {
+            var settings = AppSettingsService.Load();
+            if (!settings.AutoCheckUpdate) return;
+
+            var (_, msg, url) = await WebDavService.CheckAppReleaseAsync();
+            if (!string.IsNullOrEmpty(url))
+                ShowTrayNotification("发现 Ifboard Windows 新版本", msg);
+        }
+        catch
+        {
+            // 网络未就绪时不打扰用户
+        }
+    }
+
+    private async Task TryAutoDailySyncAsync()
+    {
+        if (_isExplicitExit) return;
+        var settings = AppSettingsService.Load();
+        if (!settings.AutoSyncDaily) return;
+
+        var cfg = WebDavService.LoadConfig();
+        if (string.IsNullOrWhiteSpace(cfg.User) || string.IsNullOrWhiteSpace(cfg.Password))
+            return;
+
+        var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        const long dayMs = 24L * 60 * 60 * 1000;
+        if (cfg.LastSyncUnixMs > 0 && nowMs - cfg.LastSyncUnixMs < dayMs)
+            return;
+
+        if (!await OperationGate.WaitAsync(0))
+            return;
+
+        try
+        {
+            await WebDavService.SyncUserDbAsync(cfg);
+            await Dispatcher.InvokeAsync(() => _mainWindow?.RefreshExternalState());
+        }
+        catch
+        {
+            // 后台自动同步失败静默忽略，待下次周期或用户手动触发
+        }
+        finally
+        {
+            OperationGate.Release();
+            ScheduleHiddenWindowRelease();
+            ScheduleTrayTrim(aggressive: false, delayMs: 400);
         }
     }
 

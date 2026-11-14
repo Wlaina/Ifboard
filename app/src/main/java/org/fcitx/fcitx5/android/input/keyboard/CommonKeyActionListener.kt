@@ -101,8 +101,8 @@ class CommonKeyActionListener :
                     else -> {
                         when (action.sym.sym) {
                             FcitxKeyMapping.FcitxKey_BackSpace -> TypoCorrector.popLast()
-                            // 空格上屏 Rime 首选：按原样按键学习触摸习惯
-                            FcitxKeyMapping.FcitxKey_space -> TypoCorrector.onLiteralCommitted()
+                            // 空格上屏 Rime 首选：结合首选词校验真实编码以学习触摸习惯
+                            FcitxKeyMapping.FcitxKey_space -> horizontalCandidate.learnLiteralOnSpace()
                         }
                         service.postFcitxJob {
                             sendKey(action.sym, action.states)

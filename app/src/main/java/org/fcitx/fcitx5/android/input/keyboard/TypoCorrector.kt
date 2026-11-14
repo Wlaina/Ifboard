@@ -82,23 +82,38 @@ object TypoCorrector {
     private const val PREFS = "ifb_touch_model"
     private const val PREFS_KEY = "offsets_v1"
     private const val PREFS_SAMPLES = "samples_v1"
+    private const val PREFS_UPDATED_AT = "updated_at_v1"
+    private const val PREFS_RESET_AT = "reset_at_v1"
+    private const val PREFS_REMOTE_SYNCED_AT = "remote_synced_at_v1"
     private const val LEARN_RATE = 0.06f
     private const val MAX_OFFSET = 0.32f
 
     private const val MAX_TAPS = 16
     private val taps = ArrayList<Tap>(MAX_TAPS)
     private var lastGeometry: GlideTyping.Geometry? = null
+    private var updatedAt = 0L
+    private var resetAt = 0L
+
+    @Volatile
+    private var reverseDictCache: Pair<GlideTyping.Dict, HashMap<String, MutableList<String>>>? = null
+
+    private fun ensureLoadedFromPrefs(context: Context): android.content.SharedPreferences {
+        prefs?.let { return it }
+        val p = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        prefs = p
+        loadOffsets(p.getString(PREFS_KEY, null))
+        learnedTotal = p.getInt(PREFS_SAMPLES, 0)
+        resetAt = p.getLong(PREFS_RESET_AT, 0L)
+        updatedAt = p.getLong(PREFS_UPDATED_AT, if (learnedTotal > 0) 1L else 0L)
+        return p
+    }
 
     @Synchronized
     fun prepare(context: Context, mode: GlideTyping.Mode) {
         if (mode != this.mode) taps.clear()
         this.mode = mode
         GlideTyping.prepare(context, mode)
-        if (prefs == null) {
-            prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            loadOffsets(prefs?.getString(PREFS_KEY, null))
-            learnedTotal = prefs?.getInt(PREFS_SAMPLES, 0) ?: 0
-        }
+        ensureLoadedFromPrefs(context)
     }
 
     /** 设置页展示用：已学到的每键平均偏移（单位：键宽 / 键高）与累计学习次数 */
@@ -106,18 +121,8 @@ object TypoCorrector {
 
     @Synchronized
     fun snapshot(context: Context): TouchModelSnapshot {
-        if (prefs != null) return TouchModelSnapshot(learnedTotal, offX.copyOf(), offY.copyOf())
-        // 输入法还没在本进程里加载过：直接读已保存的数据
-        val p = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val x = FloatArray(26)
-        val y = FloatArray(26)
-        p.getString(PREFS_KEY, null)?.split(',')?.takeIf { it.size == 52 }?.let { parts ->
-            for (i in 0 until 26) {
-                x[i] = parts[i].toFloatOrNull() ?: 0f
-                y[i] = parts[26 + i].toFloatOrNull() ?: 0f
-            }
-        }
-        return TouchModelSnapshot(p.getInt(PREFS_SAMPLES, 0), x, y)
+        ensureLoadedFromPrefs(context)
+        return TouchModelSnapshot(learnedTotal, offX.copyOf(), offY.copyOf())
     }
 
     /** 清空已学到的触摸习惯（内存与本机存储） */
@@ -125,9 +130,18 @@ object TypoCorrector {
     fun resetTouchModel(context: Context) {
         resetOffsets()
         learnedTotal = 0
-        val p = prefs ?: context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        runCatching { p.edit().remove(PREFS_KEY).remove(PREFS_SAMPLES).apply() }
-            .onFailure { Timber.w(it, "reset touch model failed") }
+        val now = System.currentTimeMillis()
+        updatedAt = now
+        resetAt = now
+        val p = ensureLoadedFromPrefs(context)
+        runCatching {
+            p.edit()
+                .remove(PREFS_KEY)
+                .putInt(PREFS_SAMPLES, 0)
+                .putLong(PREFS_UPDATED_AT, now)
+                .putLong(PREFS_RESET_AT, now)
+                .apply()
+        }.onFailure { Timber.w(it, "reset touch model failed") }
     }
 
     internal fun loadOffsets(s: String?) {
@@ -191,18 +205,26 @@ object TypoCorrector {
         taps.clear()
     }
 
-    /** 选中了 Rime 自己的候选：若它恰好覆盖全部按键且全是合法音节，就当作按键无误来学习落点习惯 */
+    /** 选中了 Rime 自己的候选：优先反查词典真实编码以兼容 Rime 自带纠错，再退回合法音节直学 */
     @Synchronized
     fun onEngineCandidateSelected(word: String) {
-        if (word.isEmpty()) return
+        if (word.isEmpty() || taps.isEmpty()) return
         if (mode == GlideTyping.Mode.Pinyin) {
-            // 全拼无法把选中的字对回到具体按键：只在它恰好覆盖整串输入时学习，其余情况清空重新跟踪
-            if (pinyinSyllableCount(typedNow()) == word.length) learn(typedNow())
+            val dict = GlideTyping.dictFor(GlideTyping.Mode.Pinyin)
+            val matched = findBestMatchingCode(word, taps.size, dict)
+            val typed = typedNow()
+            val codeToLearn = matched ?: typed.takeIf { pinyinSyllableCount(it) == word.length }
+            if (codeToLearn != null) learn(codeToLearn)
             taps.clear()
             return
         }
         val drop = word.length * 2
-        if (drop == taps.size && literalAllValid()) learn(String(CharArray(taps.size) { taps[it].ch }))
+        if (drop <= taps.size) {
+            val dict = GlideTyping.flypyDict
+            val matched = findBestMatchingCode(word, drop, dict)
+            val codeToLearn = matched ?: typedPrefixIfValidFlypy(drop)
+            if (codeToLearn != null) learn(codeToLearn)
+        }
         if (drop >= taps.size) {
             taps.clear()
         } else {
@@ -221,12 +243,70 @@ object TypoCorrector {
     @Synchronized
     fun onLiteralCommitted() {
         if (mode == GlideTyping.Mode.Pinyin) {
-            if (taps.size >= 2 && pinyinSyllableCount(typedNow()) > 0) learn(typedNow())
+            val typed = typedNow()
+            if (taps.size >= 2 && pinyinSyllableCount(typed) > 0) learn(typed)
+            taps.clear()
             return
         }
-        if (taps.size in 2..8 && taps.size % 2 == 0 && literalAllValid()) {
+        if (taps.size in 2..MAX_TAPS && taps.size % 2 == 0 && literalAllValid()) {
             learn(typedNow())
         }
+        taps.clear()
+    }
+
+    private fun typedPrefixIfValidFlypy(len: Int): String? {
+        if (len <= 0 || len > taps.size || len % 2 != 0) return null
+        val valid = GlideTyping.flypyDict?.validSyllables ?: return null
+        val sb = StringBuilder(len)
+        for (k in 0 until len / 2) {
+            val syl = "${taps[2 * k].ch}${taps[2 * k + 1].ch}"
+            if (syl !in valid) return null
+            sb.append(syl)
+        }
+        return sb.toString()
+    }
+
+    private fun reverseMap(dict: GlideTyping.Dict): HashMap<String, MutableList<String>> {
+        reverseDictCache?.let { if (it.first === dict) return it.second }
+        val map = HashMap<String, MutableList<String>>(dict.outputs.size)
+        for (i in dict.outputs.indices) {
+            map.getOrPut(dict.outputs[i]) { ArrayList(1) }.add(dict.codes[i])
+        }
+        reverseDictCache = dict to map
+        return map
+    }
+
+    private fun findBestMatchingCode(word: String, len: Int, dict: GlideTyping.Dict?): String? {
+        if (dict == null || len <= 0 || len > taps.size) return null
+        val codes = reverseMap(dict)[word] ?: return null
+        val geom = lastGeometry
+        var bestCode: String? = null
+        var bestDist2 = Float.MAX_VALUE
+        for (c in codes) {
+            if (c.length != len) continue
+            var sum2 = 0f
+            var valid = true
+            for (i in 0 until len) {
+                val k = c[i] - 'a'
+                if (k !in 0..25) {
+                    valid = false
+                    break
+                }
+                val (cx, cy) = center(k, geom)
+                val dx = taps[i].gx - cx
+                val dy = taps[i].gy - cy
+                if (abs(dx) > 1.25f || abs(dy) > 1.25f) {
+                    valid = false
+                    break
+                }
+                sum2 += dx * dx + dy * dy
+            }
+            if (valid && sum2 < bestDist2) {
+                bestDist2 = sum2
+                bestCode = c
+            }
+        }
+        return bestCode
     }
 
     private fun typedNow() = String(CharArray(taps.size) { taps[it].ch })
@@ -283,8 +363,9 @@ object TypoCorrector {
 
     private fun learn(code: String) {
         val geom = lastGeometry
+        val limit = minOf(code.length, taps.size)
         var changed = false
-        for (i in code.indices) {
+        for (i in 0 until limit) {
             val k = code[i] - 'a'
             if (k !in 0..25) continue
             val (cx, cy) = center(k, geom)
@@ -298,10 +379,166 @@ object TypoCorrector {
         }
         if (!changed) return
         learnedTotal++
+        updatedAt = System.currentTimeMillis()
         // 每次都写：apply() 是异步的，开销很小；攒批保存会在重装或进程被杀时丢掉最近的学习结果
         val p = prefs ?: return
-        runCatching { p.edit().putString(PREFS_KEY, dumpOffsets()).putInt(PREFS_SAMPLES, learnedTotal).apply() }
-            .onFailure { Timber.w(it, "save touch model failed") }
+        runCatching {
+            p.edit()
+                .putString(PREFS_KEY, dumpOffsets())
+                .putInt(PREFS_SAMPLES, learnedTotal)
+                .putLong(PREFS_UPDATED_AT, updatedAt)
+                .apply()
+        }.onFailure { Timber.w(it, "save touch model failed") }
+    }
+
+    // ------------------------------------------------------------------ WebDAV cloud sync
+
+    internal data class SyncPayload(
+        val version: Int,
+        val updatedAt: Long,
+        val resetAt: Long,
+        val samples: Int,
+        val offX: FloatArray,
+        val offY: FloatArray
+    )
+
+    enum class SyncMergeOutcome { NO_CHANGE, UPDATED_LOCAL, PUSH_LOCAL }
+
+    internal data class PureMergeResult(
+        val outcome: SyncMergeOutcome,
+        val merged: SyncPayload,
+        val pushNeeded: Boolean
+    )
+
+    internal fun serializePayload(p: SyncPayload): String {
+        val offsets = (p.offX.asList() + p.offY.asList())
+            .joinToString(",") { "%.4f".format(java.util.Locale.ROOT, it.coerceIn(-MAX_OFFSET, MAX_OFFSET)) }
+        return kotlinx.serialization.json.buildJsonObject {
+            put("version", kotlinx.serialization.json.JsonPrimitive(p.version))
+            put("updatedAt", kotlinx.serialization.json.JsonPrimitive(p.updatedAt))
+            put("resetAt", kotlinx.serialization.json.JsonPrimitive(p.resetAt))
+            put("samples", kotlinx.serialization.json.JsonPrimitive(p.samples))
+            put("offsets", kotlinx.serialization.json.JsonPrimitive(offsets))
+        }.toString()
+    }
+
+    internal fun parsePayload(json: String): SyncPayload? = runCatching {
+        val obj = kotlinx.serialization.json.Json.parseToJsonElement(json) as kotlinx.serialization.json.JsonObject
+        val version = (obj["version"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull() ?: 1
+        val uAt = (obj["updatedAt"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toLongOrNull() ?: 0L
+        val rAt = (obj["resetAt"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toLongOrNull() ?: 0L
+        val samples = ((obj["samples"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull() ?: 0).coerceAtLeast(0)
+        val rawOffsets = (obj["offsets"] as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty()
+        val x = FloatArray(26)
+        val y = FloatArray(26)
+        val parts = rawOffsets.split(',')
+        if (parts.size == 52) {
+            for (i in 0 until 26) {
+                x[i] = parts[i].toFloatOrNull()?.coerceIn(-MAX_OFFSET, MAX_OFFSET) ?: 0f
+                y[i] = parts[26 + i].toFloatOrNull()?.coerceIn(-MAX_OFFSET, MAX_OFFSET) ?: 0f
+            }
+        }
+        SyncPayload(version, uAt, rAt, samples, x, y)
+    }.getOrNull()
+
+    internal fun mergePayloads(
+        local: SyncPayload,
+        remote: SyncPayload,
+        lastSyncedRemoteAt: Long
+    ): PureMergeResult {
+        // 1. 本机在远端更新之后主动执行过重置，保留重置并通知上传清空云端
+        if (local.resetAt > remote.updatedAt && local.samples == 0) {
+            return PureMergeResult(SyncMergeOutcome.PUSH_LOCAL, local, pushNeeded = true)
+        }
+        // 2. 远端在本地更新之后主动执行过重置，同步清空本机
+        if (remote.resetAt > local.updatedAt && remote.samples == 0) {
+            return PureMergeResult(SyncMergeOutcome.UPDATED_LOCAL, remote, pushNeeded = false)
+        }
+        // 3. 一方为空、另一方有样本：无损继承非空一方
+        if (local.samples == 0 && remote.samples > 0) {
+            return PureMergeResult(SyncMergeOutcome.UPDATED_LOCAL, remote, pushNeeded = false)
+        }
+        if (local.samples > 0 && remote.samples == 0) {
+            return PureMergeResult(SyncMergeOutcome.PUSH_LOCAL, local, pushNeeded = true)
+        }
+        if (local.samples == 0 && remote.samples == 0) {
+            return PureMergeResult(SyncMergeOutcome.NO_CHANGE, local, pushNeeded = false)
+        }
+        // 4. 远端自上次同步后未变化
+        if (remote.updatedAt <= lastSyncedRemoteAt) {
+            val needPush = local.updatedAt > remote.updatedAt || local.samples > remote.samples
+            return PureMergeResult(
+                if (needPush) SyncMergeOutcome.PUSH_LOCAL else SyncMergeOutcome.NO_CHANGE,
+                local,
+                pushNeeded = needPush
+            )
+        }
+        // 5. 本地没有自上次同步以来新增学习（远端单向更新）
+        if (local.updatedAt <= lastSyncedRemoteAt) {
+            return PureMergeResult(SyncMergeOutcome.UPDATED_LOCAL, remote, pushNeeded = false)
+        }
+        // 6. 两端各自独立学习：按样本比重加权融合，避免单边被淹没
+        val total = (local.samples + remote.samples).coerceAtLeast(1).toFloat()
+        val wRemote = (remote.samples.toFloat() / total).coerceIn(0.2f, 0.8f)
+        val wLocal = 1f - wRemote
+        val mx = FloatArray(26) { i -> (local.offX[i] * wLocal + remote.offX[i] * wRemote).coerceIn(-MAX_OFFSET, MAX_OFFSET) }
+        val my = FloatArray(26) { i -> (local.offY[i] * wLocal + remote.offY[i] * wRemote).coerceIn(-MAX_OFFSET, MAX_OFFSET) }
+        val merged = SyncPayload(
+            version = 1,
+            updatedAt = maxOf(local.updatedAt, remote.updatedAt, System.currentTimeMillis()),
+            resetAt = maxOf(local.resetAt, remote.resetAt),
+            samples = maxOf(local.samples, remote.samples),
+            offX = mx,
+            offY = my
+        )
+        return PureMergeResult(SyncMergeOutcome.UPDATED_LOCAL, merged, pushNeeded = true)
+    }
+
+    @Synchronized
+    fun exportSyncJson(context: Context): String {
+        ensureLoadedFromPrefs(context)
+        return serializePayload(
+            SyncPayload(1, updatedAt, resetAt, learnedTotal, offX.copyOf(), offY.copyOf())
+        )
+    }
+
+    @Synchronized
+    fun lastSyncedRemoteUpdatedAt(context: Context): Long =
+        ensureLoadedFromPrefs(context).getLong(PREFS_REMOTE_SYNCED_AT, 0L)
+
+    @Synchronized
+    fun markRemoteSynced(context: Context, remoteUpdatedAt: Long) {
+        ensureLoadedFromPrefs(context).edit().putLong(PREFS_REMOTE_SYNCED_AT, remoteUpdatedAt).apply()
+    }
+
+    /** 合并来自 WebDAV 的触摸习惯 JSON，返回合并结果与（若需回传）要上传的 JSON */
+    @Synchronized
+    fun mergeFromSyncJson(context: Context, remoteJson: String): Pair<SyncMergeOutcome, String?> {
+        val p = ensureLoadedFromPrefs(context)
+        val remote = parsePayload(remoteJson) ?: return SyncMergeOutcome.PUSH_LOCAL to exportSyncJson(context)
+        val local = SyncPayload(1, updatedAt, resetAt, learnedTotal, offX.copyOf(), offY.copyOf())
+        val lastSynced = p.getLong(PREFS_REMOTE_SYNCED_AT, 0L)
+        val res = mergePayloads(local, remote, lastSynced)
+        if (res.outcome == SyncMergeOutcome.UPDATED_LOCAL) {
+            for (i in 0 until 26) {
+                offX[i] = res.merged.offX[i]
+                offY[i] = res.merged.offY[i]
+            }
+            learnedTotal = res.merged.samples
+            updatedAt = res.merged.updatedAt
+            resetAt = res.merged.resetAt
+            p.edit().apply {
+                if (learnedTotal > 0) putString(PREFS_KEY, dumpOffsets()) else remove(PREFS_KEY)
+                putInt(PREFS_SAMPLES, learnedTotal)
+                putLong(PREFS_UPDATED_AT, updatedAt)
+                putLong(PREFS_RESET_AT, resetAt)
+                putLong(PREFS_REMOTE_SYNCED_AT, res.merged.updatedAt)
+            }.apply()
+        } else if (res.outcome == SyncMergeOutcome.NO_CHANGE) {
+            p.edit().putLong(PREFS_REMOTE_SYNCED_AT, maxOf(lastSynced, remote.updatedAt)).apply()
+        }
+        val jsonToPush = if (res.pushNeeded) serializePayload(res.merged) else null
+        return res.outcome to jsonToPush
     }
 
     private fun center(k: Int, g: GlideTyping.Geometry?): Pair<Float, Float> =

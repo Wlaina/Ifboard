@@ -39,9 +39,20 @@ class ClipboardSuggestionUi(override val ctx: Context, private val theme: Theme)
         }
     }
 
+    private val thumb = imageView {
+        scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+        clipToOutline = true
+        outlineProvider = object : android.view.ViewOutlineProvider() {
+            override fun getOutline(view: android.view.View, outline: android.graphics.Outline) {
+                outline.setRoundRect(0, 0, view.width, view.height, dp(4).toFloat())
+            }
+        }
+        visibility = android.view.View.GONE
+    }
+
     val text = textView {
         isSingleLine = true
-        maxWidth = dp(120)
+        maxWidth = dp(168)
         ellipsize = TextUtils.TruncateAt.END
         setTextColor(theme.altKeyTextColor)
     }
@@ -50,11 +61,16 @@ class ClipboardSuggestionUi(override val ctx: Context, private val theme: Theme)
         val spacing = dp(4)
         add(icon, lParams(dp(20), dp(20)) {
             startOfParent(spacing)
+            before(thumb)
+            centerVertically()
+        })
+        add(thumb, lParams(dp(24), dp(24)) {
+            after(icon, spacing)
             before(text)
             centerVertically()
         })
         add(text, lParams(wrapContent, wrapContent) {
-            after(icon, spacing)
+            after(thumb, spacing)
             endOfParent(spacing)
             centerVertically()
         })
@@ -70,5 +86,40 @@ class ClipboardSuggestionUi(override val ctx: Context, private val theme: Theme)
             centerInParent()
             verticalMargin = dp(4)
         })
+    }
+
+    fun showText(content: CharSequence) {
+        thumb.setImageDrawable(null)
+        thumb.visibility = android.view.View.GONE
+        icon.visibility = android.view.View.VISIBLE
+        text.text = content
+        playEnterAnimation()
+    }
+
+    fun showImage(bitmap: android.graphics.Bitmap?, label: CharSequence) {
+        if (bitmap != null) {
+            thumb.setImageBitmap(bitmap)
+            thumb.visibility = android.view.View.VISIBLE
+            icon.visibility = android.view.View.GONE
+        } else {
+            thumb.setImageDrawable(null)
+            thumb.visibility = android.view.View.GONE
+            icon.visibility = android.view.View.VISIBLE
+        }
+        text.text = label
+        playEnterAnimation()
+    }
+
+    private fun playEnterAnimation() {
+        suggestionView.animate().cancel()
+        suggestionView.alpha = 0f
+        suggestionView.scaleX = 0.94f
+        suggestionView.scaleY = 0.94f
+        suggestionView.animate()
+            .alpha(1f)
+            .scaleX(1f)
+            .scaleY(1f)
+            .setDuration(150L)
+            .start()
     }
 }

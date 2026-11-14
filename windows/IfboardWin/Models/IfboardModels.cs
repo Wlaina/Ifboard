@@ -37,7 +37,8 @@ public sealed class WebDavConfig
 public sealed record SyncResult(
     int Uploaded,
     int Downloaded,
-    IReadOnlyList<string> OtherDevices
+    IReadOnlyList<string> OtherDevices,
+    int TouchSamples = 0
 );
 
 public sealed record ProfileTransferResult(
@@ -49,7 +50,8 @@ public sealed record GrammarRemoteInfo(
     string DownloadUrl,
     long SizeBytes,
     string? Sha256,
-    string UpdatedAt
+    string UpdatedAt,
+    string Source = "GitHub"
 );
 
 public sealed class GrammarMeta
@@ -68,6 +70,8 @@ public sealed class AppSettings
     public int CornerRadius { get; set; } = 7;
     public bool AutoFollowSystemAccentTray { get; set; } = true;
     public bool DisableAppForcedAscii { get; set; } = true;
+    public bool AutoSyncDaily { get; set; } = true;
+    public bool AutoCheckUpdate { get; set; } = true;
 }
 
 public sealed class RimePreferences
@@ -86,6 +90,7 @@ public sealed class RimePreferences
     public bool CtrlSpaceOnlySwitch { get; set; }
     public bool TabPageFlip { get; set; } = true;
     public bool GrammarEnabled { get; set; } = true;
+    public bool EnableCorrection { get; set; } = true;
 }
 
 public sealed record WeaselColorSchemeSpec(

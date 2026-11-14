@@ -179,6 +179,7 @@ abstract class BaseExpandedCandidateWindow<T : BaseExpandedCandidateWindow<T>> :
 
     fun bindCandidateUiViewHolder(holder: CandidateViewHolder) {
         holder.itemView.setOnClickListener {
+            org.fcitx.fcitx5.android.input.keyboard.TypoCorrector.onEngineCandidateSelected(holder.candidate.text)
             fcitx.launchOnReady { it.select(holder.idx) }
         }
         holder.itemView.setOnLongClickListener {

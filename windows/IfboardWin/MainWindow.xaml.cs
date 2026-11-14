@@ -66,6 +66,7 @@ public partial class MainWindow : Window
             DeviceBadgeText.Text = string.IsNullOrWhiteSpace(devId)
                 ? $"公开版 v{Paths.AppVersion}"
                 : $"公开版 v{Paths.AppVersion} · {devId}";
+            AboutTitleText.Text = $"Ifboard for Windows（公开版 v{Paths.AppVersion}）";
 
             // WebDAV
             DavUrlBox.Text = _webDav.Url;
@@ -78,6 +79,8 @@ public partial class MainWindow : Window
             LastSyncText.Text = _webDav.LastSyncUnixMs > 0
                 ? $"上次同步：{DateTimeOffset.FromUnixTimeMilliseconds(_webDav.LastSyncUnixMs).LocalDateTime:MM-dd HH:mm}"
                 : "上次同步：尚未同步";
+            DailyAutoSyncCheck.IsChecked = _settings.AutoSyncDaily;
+            AutoCheckUpdateCheck.IsChecked = _settings.AutoCheckUpdate;
 
             // 仅当本机尚无 WebDAV 密码且存在旧版配置文件时提示一键导入
             var hasSavedPass = !string.IsNullOrWhiteSpace(_webDav.User) && !string.IsNullOrWhiteSpace(_webDav.Password);
@@ -99,6 +102,7 @@ public partial class MainWindow : Window
             KeepRawFlypyCheck.IsChecked = _rimePrefs.KeepRawFlypyPreedit;
             CtrlSpaceOnlyCheck.IsChecked = _rimePrefs.CtrlSpaceOnlySwitch;
             TabPageFlipCheck.IsChecked = _rimePrefs.TabPageFlip;
+            EnableCorrectionCheck.IsChecked = _rimePrefs.EnableCorrection;
 
             // 外观设定
             UiAutoRadio.IsChecked = _settings.UiMode == UiThemeMode.Auto;
@@ -382,8 +386,9 @@ public partial class MainWindow : Window
                 var res = await WebDavService.SyncUserDbAsync(cfg, prog);
                 LastSyncText.Text = $"上次同步：{DateTime.Now:MM-dd HH:mm}";
                 var others = res.OtherDevices.Count > 0 ? string.Join("、", res.OtherDevices) : "无";
+                var touchSuffix = res.TouchSamples > 0 ? $"，云端触摸习惯 {res.TouchSamples} 样本" : "";
                 SetStatus(
-                    $"双向词库同步完成：上传 {res.Uploaded} 份，合并下载 {res.Downloaded} 份（云端其他设备：{others}）。",
+                    $"双向词库同步完成：上传 {res.Uploaded} 份，合并下载 {res.Downloaded} 份（云端其他设备：{others}{touchSuffix}）。",
                     detail: DateTime.Now.ToString("HH:mm:ss")
                 );
             }
@@ -495,14 +500,14 @@ public partial class MainWindow : Window
                 if (hasUpd)
                 {
                     GrammarDetailText.Text =
-                        $"云端最新 LTS：{sizeMb:F1} MB · 更新于 {_cachedRemoteGrammar.UpdatedAt}\n建议点击「下载 / 更新语法模型」获取新版权重。";
+                        $"云端最新 LTS [{_cachedRemoteGrammar.Source}]：{sizeMb:F1} MB · 更新于 {_cachedRemoteGrammar.UpdatedAt}\n建议点击「下载 / 更新语法模型」获取新版权重。";
                     DownloadGrammarBtn.Content = "更新至最新 LTS";
-                    SetStatus($"检测到新版或未安装语法模型（{sizeMb:F1} MB）。", detail: _cachedRemoteGrammar.UpdatedAt);
+                    SetStatus($"检测到新版或未安装语法模型（{sizeMb:F1} MB · {_cachedRemoteGrammar.Source}）。", detail: _cachedRemoteGrammar.UpdatedAt);
                 }
                 else
                 {
                     GrammarDetailText.Text =
-                        $"本地语法模型与云端 LTS 一致（{sizeMb:F1} MB · 更新于 {_cachedRemoteGrammar.UpdatedAt}），无需更新。";
+                        $"本地语法模型与云端 LTS 一致（{_cachedRemoteGrammar.Source} · {sizeMb:F1} MB · 更新于 {_cachedRemoteGrammar.UpdatedAt}），无需更新。";
                     SetStatus("万象语法模型已是最新 LTS 版本。");
                 }
             }
@@ -540,6 +545,8 @@ public partial class MainWindow : Window
                 await GrammarModelService.DownloadAndInstallAsync(_cachedRemoteGrammar, progress, _grammarDownloadCts.Token);
                 RefreshLocalGrammarCard();
                 SetStatus("万象语法模型已安装校验完成并部署生效。", detail: DateTime.Now.ToString("HH:mm:ss"));
+                if (!IsVisible && System.Windows.Application.Current is App okApp)
+                    okApp.ShowTrayNotification("万象语法模型已就绪", "模型已完成下载、SHA-256 校验与小狼毫部署，现在即可使用。");
             }
             catch (OperationCanceledException)
             {
@@ -550,6 +557,8 @@ public partial class MainWindow : Window
             {
                 RefreshLocalGrammarCard();
                 SetStatus($"下载/安装语法模型失败：{ex.Message}", isError: true);
+                if (!IsVisible && System.Windows.Application.Current is App errApp)
+                    errApp.ShowTrayNotification("语法模型下载中断", ex.Message, isError: true);
             }
             finally
             {
@@ -608,8 +617,18 @@ public partial class MainWindow : Window
         KeepRawFlypyPreedit = KeepRawFlypyCheck.IsChecked == true,
         CtrlSpaceOnlySwitch = CtrlSpaceOnlyCheck.IsChecked == true,
         TabPageFlip = TabPageFlipCheck.IsChecked == true,
-        GrammarEnabled = GrammarEnabledCheck.IsChecked == true
+        GrammarEnabled = GrammarEnabledCheck.IsChecked == true,
+        EnableCorrection = EnableCorrectionCheck.IsChecked == true
     };
+
+    private void AppOptionCheck_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_isBindingUi || !IsLoaded) return;
+        _settings.AutoSyncDaily = DailyAutoSyncCheck.IsChecked == true;
+        _settings.AutoCheckUpdate = AutoCheckUpdateCheck.IsChecked == true;
+        AppSettingsService.Save(_settings);
+        SetStatus("自动同步与更新检查偏好已保存。");
+    }
 
     private void InputControl_Changed(object sender, RoutedEventArgs e)
     {
@@ -801,6 +820,8 @@ public partial class MainWindow : Window
                 _settings.CornerRadius = Math.Clamp((int)CornerSlider.Value, 0, 14);
                 _settings.AutoFollowSystemAccentTray = AutoAccentTrayCheck.IsChecked == true;
                 _settings.DisableAppForcedAscii = DisableForcedAsciiCheck.IsChecked == true;
+                _settings.AutoSyncDaily = DailyAutoSyncCheck.IsChecked == true;
+                _settings.AutoCheckUpdate = AutoCheckUpdateCheck.IsChecked == true;
 
                 AppSettingsService.Save(_settings);
                 WeaselSkinService.WriteWeaselCustomYaml(_settings);

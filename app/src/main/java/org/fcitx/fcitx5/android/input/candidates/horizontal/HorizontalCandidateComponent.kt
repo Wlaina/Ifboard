@@ -220,6 +220,19 @@ class HorizontalCandidateComponent :
         return true
     }
 
+    fun learnLiteralOnSpace() {
+        if (!typoCorrection) {
+            TypoCorrector.clear()
+            return
+        }
+        val top = lastEngineData?.candidates?.firstOrNull()?.text
+        if (!top.isNullOrEmpty()) {
+            TypoCorrector.onEngineCandidateSelected(top)
+        } else {
+            TypoCorrector.onLiteralCommitted()
+        }
+    }
+
     override fun onImeUpdate(ime: InputMethodEntry) {
         english = ime.uniqueName.startsWith("keyboard-")
         // 邻键纠错覆盖 Rime 的小鹤双拼与全拼（其他双拼方案没有对应词典），与 TextKeyboard.glideMode 的判定一致
@@ -246,6 +259,7 @@ class HorizontalCandidateComponent :
         if (empty) {
             GlideAlternates.clear()
             primaryCorrectionWord = null
+            lastEngineData = null
             TypoCorrector.clear()
         }
     }

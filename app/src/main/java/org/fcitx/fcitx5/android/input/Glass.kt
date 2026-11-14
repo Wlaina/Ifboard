@@ -38,6 +38,7 @@ object Glass {
         @ColorInt color: Int,
         radiusDp: Int = 28,
         cornerRadiusDp: Float = 0f,
+        topCornerRadiusDp: Float? = null,
         host: View = view
     ): Boolean {
         if (!enabled) return false
@@ -60,8 +61,24 @@ object Glass {
             val px = (radiusDp * density).toInt()
             d.javaClass.getMethod("setBlurRadius", Int::class.javaPrimitiveType).invoke(d, px)
             d.javaClass.getMethod("setColor", Int::class.javaPrimitiveType).invoke(d, tint(color))
-            d.javaClass.getMethod("setCornerRadius", Float::class.javaPrimitiveType)
-                .invoke(d, cornerRadiusDp * density)
+            if (topCornerRadiusDp != null) {
+                val topPx = topCornerRadiusDp * density
+                runCatching {
+                    d.javaClass.getMethod(
+                        "setCornerRadius",
+                        Float::class.javaPrimitiveType,
+                        Float::class.javaPrimitiveType,
+                        Float::class.javaPrimitiveType,
+                        Float::class.javaPrimitiveType
+                    ).invoke(d, topPx, topPx, 0f, 0f)
+                }.onFailure {
+                    d.javaClass.getMethod("setCornerRadius", Float::class.javaPrimitiveType)
+                        .invoke(d, cornerRadiusDp * density)
+                }
+            } else {
+                d.javaClass.getMethod("setCornerRadius", Float::class.javaPrimitiveType)
+                    .invoke(d, cornerRadiusDp * density)
+            }
             if (view.background !== d) {
                 view.background = d
             }

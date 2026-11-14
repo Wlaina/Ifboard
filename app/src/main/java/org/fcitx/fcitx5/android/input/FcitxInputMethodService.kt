@@ -41,9 +41,11 @@ import androidx.autofill.inline.v1.InlineSuggestionUi
 import androidx.core.view.updateLayoutParams
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.consumeEach
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.core.CapabilityFlags
@@ -227,6 +229,68 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         decorView = window.window!!.decorView
         contentView = decorView.findViewById(android.R.id.content)
         lastKnownConfig = resources.configuration
+        registerQuickPasteObservers()
+    }
+
+    private var mediaScreenshotObserver: android.database.ContentObserver? = null
+    private var smsOtpObserver: android.database.ContentObserver? = null
+    private var screenshotDebounceJob: Job? = null
+
+    private fun registerQuickPasteObservers() {
+        val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+        if (mediaScreenshotObserver == null) {
+            val obs = object : android.database.ContentObserver(mainHandler) {
+                override fun onChange(selfChange: Boolean) {
+                    screenshotDebounceJob?.cancel()
+                    screenshotDebounceJob = lifecycleScope.launch(Dispatchers.IO) {
+                        val before = org.fcitx.fcitx5.android.input.clipboard.ClipboardImages.lastDetectedScreenshot?.uri
+                        // MIUI/HyperOS 先写入 IS_PENDING=1 再延后提交，若首次未检测到则短重试两次
+                        for (waitMs in longArrayOf(350L, 650L, 1100L)) {
+                            delay(waitMs)
+                            org.fcitx.fcitx5.android.input.clipboard.ClipboardImages.checkAndNotifyScreenshot(
+                                this@FcitxInputMethodService
+                            )
+                            if (org.fcitx.fcitx5.android.input.clipboard.ClipboardImages.lastDetectedScreenshot?.uri != before) break
+                        }
+                    }
+                }
+            }
+            val registered = runCatching {
+                contentResolver.registerContentObserver(
+                    android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    true,
+                    obs
+                )
+                true
+            }.getOrDefault(false)
+            if (registered) mediaScreenshotObserver = obs
+        }
+        ensureSmsObserverRegistered()
+    }
+
+    private fun ensureSmsObserverRegistered() {
+        if (smsOtpObserver != null) return
+        if (!org.fcitx.fcitx5.android.ifboard.SmsCodeHelper.hasReadSmsPermission(this)) return
+        val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+        val obs = object : android.database.ContentObserver(mainHandler) {
+            override fun onChange(selfChange: Boolean) {
+                lifecycleScope.launch(Dispatchers.IO) {
+                    delay(200L)
+                    org.fcitx.fcitx5.android.ifboard.SmsCodeHelper.queryLatestInboxOtp(
+                        this@FcitxInputMethodService
+                    )
+                }
+            }
+        }
+        val registered = runCatching {
+            contentResolver.registerContentObserver(
+                android.net.Uri.parse("content://sms"),
+                true,
+                obs
+            )
+            true
+        }.getOrDefault(false)
+        if (registered) smsOtpObserver = obs
     }
 
     /** Ifboard: inline tools (translation) can capture what the keyboard types */
@@ -809,6 +873,8 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
 
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
         Timber.d("onStartInputView: restarting=$restarting")
+        ensureSmsObserverRegistered()
+        org.fcitx.fcitx5.android.ifboard.IfboardSync.maybeAutoSync(applicationContext)
         postFcitxJob {
             focus(true)
         }
@@ -1137,6 +1203,9 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     }
 
     override fun onDestroy() {
+        screenshotDebounceJob?.cancel()
+        mediaScreenshotObserver?.let { runCatching { contentResolver.unregisterContentObserver(it) } }
+        smsOtpObserver?.let { runCatching { contentResolver.unregisterContentObserver(it) } }
         recreateInputViewPrefs.forEach {
             it.unregisterOnChangeListener(recreateInputViewListener)
         }

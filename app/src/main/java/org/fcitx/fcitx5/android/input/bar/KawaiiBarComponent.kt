@@ -126,6 +126,10 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
     private var clipboardTimeoutJob: Job? = null
 
     private var isClipboardFresh: Boolean = false
+    private var quickPasteImage: org.fcitx.fcitx5.android.input.clipboard.ClipboardImage? = null
+    private var quickPasteOtp: org.fcitx.fcitx5.android.ifboard.SmsCodeHelper.OtpEntry? = null
+    private var lastShownScreenshotUri: String? = null
+    private var lastShownClipboardImgUri: String? = null
     private var isInlineSuggestionPresent: Boolean = false
     private var isCapabilityFlagsPassword: Boolean = false
     private var isKeyboardLayoutNumber: Boolean = false
@@ -143,10 +147,23 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
                 if (it.text.isEmpty()) {
                     isClipboardFresh = false
                 } else {
-                    idleUi.clipboardUi.text.text = if (it.sensitive && clipboardMaskSensitive) {
-                        ClipboardEntry.BULLET.repeat(min(42, it.text.length))
+                    quickPasteImage = null
+                    val trimmed = it.text.trim()
+                    if (org.fcitx.fcitx5.android.ifboard.SmsCodeHelper.wasRecentlyConsumed(context, trimmed)) {
+                        return@launch
+                    }
+                    val otpNow = org.fcitx.fcitx5.android.ifboard.SmsCodeHelper.activePendingOtp(context)
+                    if (otpNow != null && otpNow.code == trimmed) {
+                        quickPasteOtp = otpNow
+                        idleUi.clipboardUi.showText("验证码 ${otpNow.code}")
                     } else {
-                        it.text.take(42)
+                        quickPasteOtp = null
+                        val display = if (it.sensitive && clipboardMaskSensitive) {
+                            ClipboardEntry.BULLET.repeat(min(42, it.text.length))
+                        } else {
+                            it.text.take(42)
+                        }
+                        idleUi.clipboardUi.showText(display)
                     }
                     isClipboardFresh = true
                     launchClipboardTimeoutJob()
@@ -154,6 +171,59 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
                 evalIdleUiState()
             }
         }
+
+    @Keep
+    private val onClipboardImageListener =
+        ClipboardManager.OnClipboardImageListener { uri, mime, ts ->
+            if (!clipboardSuggestion.getValue()) return@OnClipboardImageListener
+            val uriStr = uri.toString()
+            if (uriStr == lastShownClipboardImgUri && isClipboardFresh && quickPasteImage?.uri == uri) {
+                return@OnClipboardImageListener
+            }
+            lastShownClipboardImgUri = uriStr
+            val img = org.fcitx.fcitx5.android.input.clipboard.ClipboardImage(uri, mime, fromClipboard = true, ts)
+            showImageSuggestion(img, "图片 · 点击发送")
+        }
+
+    @Keep
+    private val onScreenshotListener =
+        org.fcitx.fcitx5.android.input.clipboard.ClipboardImages.OnScreenshotListener { img ->
+            if (!clipboardSuggestion.getValue()) return@OnScreenshotListener
+            val uriStr = img.uri.toString()
+            if (uriStr == lastShownScreenshotUri) return@OnScreenshotListener
+            lastShownScreenshotUri = uriStr
+            showImageSuggestion(img, "截图 · 点击发送")
+        }
+
+    @Keep
+    private val onOtpListener =
+        org.fcitx.fcitx5.android.ifboard.SmsCodeHelper.OnOtpListener { entry ->
+            service.lifecycleScope.launch {
+                quickPasteImage = null
+                quickPasteOtp = entry
+                idleUi.clipboardUi.showText("验证码 ${entry.code}")
+                isClipboardFresh = true
+                launchClipboardTimeoutJob()
+                evalIdleUiState()
+            }
+        }
+
+    private fun showImageSuggestion(
+        image: org.fcitx.fcitx5.android.input.clipboard.ClipboardImage,
+        label: String
+    ) {
+        service.lifecycleScope.launch {
+            val bmp = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                org.fcitx.fcitx5.android.input.clipboard.ClipboardImages.loadThumbnailBitmap(context, image.uri, context.dp(48))
+            }
+            quickPasteOtp = null
+            quickPasteImage = image
+            idleUi.clipboardUi.showImage(bmp, label)
+            isClipboardFresh = true
+            launchClipboardTimeoutJob()
+            evalIdleUiState()
+        }
+    }
 
     @Keep
     private val onClipboardSuggestionUpdateListener =
@@ -392,8 +462,22 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
             }
             clipboardUi.suggestionView.apply {
                 setOnClickListener {
-                    ClipboardManager.lastEntry?.let {
-                        service.commitText(it.text)
+                    val otp = quickPasteOtp
+                    val img = quickPasteImage
+                    if (otp != null) {
+                        service.commitText(otp.code)
+                        org.fcitx.fcitx5.android.ifboard.SmsCodeHelper.markConsumed(context)
+                        quickPasteOtp = null
+                    } else if (img != null) {
+                        quickPasteImage = null
+                        org.fcitx.fcitx5.android.input.clipboard.ClipboardImages.markQuickSuggestedUsed(img.uri)
+                        org.fcitx.fcitx5.android.input.clipboard.ClipboardImages.send(
+                            service, service.lifecycleScope, img
+                        ) {}
+                    } else {
+                        ClipboardManager.lastEntry?.let {
+                            service.commitText(it.text)
+                        }
                     }
                     clipboardTimeoutJob?.cancel()
                     clipboardTimeoutJob = null
@@ -401,8 +485,12 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
                     evalIdleUiState()
                 }
                 setOnLongClickListener {
-                    ClipboardManager.lastEntry?.let {
-                        AppUtil.launchClipboardEdit(context, it.id, true)
+                    if (quickPasteImage != null) {
+                        windowManager.attachWindow(ClipboardWindow())
+                    } else {
+                        ClipboardManager.lastEntry?.let {
+                            AppUtil.launchClipboardEdit(context, it.id, true)
+                        }
                     }
                     true
                 }
@@ -450,6 +538,19 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
         }
     }
 
+    private fun rotateExpandButton(targetRotation: Float) {
+        val btn = candidateUi.expandButton
+        val iconView = (0 until btn.childCount).firstNotNullOfOrNull {
+            btn.getChildAt(it) as? android.widget.ImageView
+        } ?: btn
+        if (btn.visibility != View.VISIBLE) {
+            iconView.rotation = targetRotation
+        } else {
+            iconView.animate().cancel()
+            iconView.animate().rotation(targetRotation).setDuration(150L).start()
+        }
+    }
+
     // set expand candidate button to create expand candidate
     private fun setExpandButtonToAttach() {
         candidateUi.expandButton.setOnClickListener {
@@ -461,6 +562,7 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
             )
         }
         candidateUi.expandButton.setIcon(R.drawable.ic_baseline_expand_more_24)
+        rotateExpandButton(0f)
         candidateUi.expandButton.contentDescription = context.getString(R.string.expand_candidates_list)
     }
 
@@ -469,7 +571,8 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
         candidateUi.expandButton.setOnClickListener {
             windowManager.attachWindow(KeyboardWindow)
         }
-        candidateUi.expandButton.setIcon(R.drawable.ic_baseline_expand_less_24)
+        candidateUi.expandButton.setIcon(R.drawable.ic_baseline_expand_more_24)
+        rotateExpandButton(180f)
         candidateUi.expandButton.contentDescription = context.getString(R.string.hide_candidates_list)
     }
 
@@ -480,6 +583,8 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
 
     private val animator by lazy {
         ViewAnimator(context).apply {
+            inAnimation = android.view.animation.AlphaAnimation(0f, 1f).apply { duration = 120L }
+            outAnimation = android.view.animation.AlphaAnimation(1f, 0f).apply { duration = 90L }
             add(idleUi.root, lParams(matchParent, matchParent))
             add(candidateUi.root, lParams(matchParent, matchParent))
             add(titleUi.root, lParams(matchParent, matchParent))
@@ -567,14 +672,49 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
     }
 
     override fun onScopeSetupFinished(scope: DynamicScope) {
-        ClipboardManager.lastEntry?.let {
-            val now = System.currentTimeMillis()
-            val clipboardTimeout = clipboardItemTimeout.getValue() * 1000L
-            if (clipboardTimeout < 0L || now - it.timestamp < clipboardTimeout) {
-                onClipboardUpdateListener.onUpdate(it)
+        val now = System.currentTimeMillis()
+        val rawTimeoutSec = clipboardItemTimeout.getValue()
+        val clipboardTimeout = if (rawTimeoutSec < 0) Long.MAX_VALUE else rawTimeoutSec * 1000L
+        val pendingOtp = org.fcitx.fcitx5.android.ifboard.SmsCodeHelper.activePendingOtp(context)
+        val lastEntry = ClipboardManager.lastEntry
+        val imgUri = ClipboardManager.lastImageUri
+        val imgMime = ClipboardManager.lastImageMime
+        val imgTs = ClipboardManager.lastImageTimestamp
+        val detectedShot = org.fcitx.fcitx5.android.input.clipboard.ClipboardImages.lastDetectedScreenshot
+
+        if (pendingOtp != null) {
+            onOtpListener.onOtpDetected(pendingOtp)
+        } else if (imgUri != null && imgMime != null && now - imgTs < clipboardTimeout &&
+            imgTs >= (lastEntry?.timestamp ?: 0L) &&
+            org.fcitx.fcitx5.android.input.clipboard.ClipboardImages.isQuickSuggestionAvailable(imgUri)
+        ) {
+            if (clipboardSuggestion.getValue()) {
+                lastShownClipboardImgUri = imgUri.toString()
+                showImageSuggestion(
+                    org.fcitx.fcitx5.android.input.clipboard.ClipboardImage(imgUri, imgMime, true, imgTs),
+                    "图片 · 点击发送"
+                )
+            }
+        } else if (detectedShot != null && now - detectedShot.timestamp < clipboardTimeout &&
+            detectedShot.timestamp >= (lastEntry?.timestamp ?: 0L) &&
+            detectedShot.uri.toString() != lastShownScreenshotUri &&
+            org.fcitx.fcitx5.android.input.clipboard.ClipboardImages.isQuickSuggestionAvailable(detectedShot.uri)
+        ) {
+            if (clipboardSuggestion.getValue()) {
+                lastShownScreenshotUri = detectedShot.uri.toString()
+                showImageSuggestion(detectedShot, "截图 · 点击发送")
+            }
+        } else {
+            lastEntry?.let {
+                if (rawTimeoutSec < 0 || now - it.timestamp < clipboardTimeout) {
+                    onClipboardUpdateListener.onUpdate(it)
+                }
             }
         }
         ClipboardManager.addOnUpdateListener(onClipboardUpdateListener)
+        ClipboardManager.addOnImageListener(onClipboardImageListener)
+        org.fcitx.fcitx5.android.input.clipboard.ClipboardImages.addOnScreenshotListener(onScreenshotListener)
+        org.fcitx.fcitx5.android.ifboard.SmsCodeHelper.addListener(onOtpListener)
         clipboardSuggestion.registerOnChangeListener(onClipboardSuggestionUpdateListener)
         clipboardItemTimeout.registerOnChangeListener(onClipboardTimeoutUpdateListener)
     }
@@ -585,6 +725,14 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
         inputView.voiceBar.stop()
         inputView.translatePanel.onActiveChanged = { on ->
             idleUi.buttonsUi.translateButton.setCircleBackground(if (on) theme.keyBackgroundColor else null)
+        }
+        // 异步补查最新截屏与短信验证码，防止未在键盘展开时错过系统事件
+        service.lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            org.fcitx.fcitx5.android.ifboard.SmsCodeHelper.queryLatestInboxOtp(context, 90_000L)
+            if (clipboardSuggestion.getValue()) {
+                val maxAge = clipboardItemTimeout.getValue().let { if (it > 0) (it * 1000L).coerceAtLeast(60_000L) else 5 * 60_000L }
+                org.fcitx.fcitx5.android.input.clipboard.ClipboardImages.checkAndNotifyScreenshot(context, maxAge)
+            }
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             idleUi.privateMode(info.imeOptions.hasFlag(EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING))

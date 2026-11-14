@@ -144,6 +144,14 @@ class InputView(
         val cornerDp = if (isFloating) FLOATING_CORNER_DP else 0f
         if (Glass.applyBackgroundBlur(keyboardView, theme.backgroundColor, cornerRadiusDp = cornerDp, host = this)) {
             customBackground.alpha = 0f
+            if (keyBorder) {
+                Glass.applyBackgroundBlur(
+                    preedit.ui.root,
+                    preedit.bkgColor,
+                    topCornerRadiusDp = PreeditComponent.CORNER_RADIUS_DP,
+                    host = this
+                )
+            }
         }
         applyFloatingChrome()
         service.updateFloatingWindowState()
@@ -397,6 +405,9 @@ class InputView(
         keyboardView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
             if (!isFloating) return@addOnLayoutChangeListener
             Glass.invalidateBlur(keyboardView)
+            if (preedit.ui.root.isShown) {
+                Glass.invalidateBlur(preedit.ui.root)
+            }
             if (!isDraggingFloating) {
                 (keyboardView.layoutParams as? LayoutParams)?.let { lp ->
                     val (cx, cy) = clampFloatingPosition(lp.leftMargin, lp.bottomMargin)
@@ -414,9 +425,12 @@ class InputView(
 
         windowManager.onWindowAttachedListener = { applyBottomInsetMode(it) }
 
-        add(preedit.ui.root, lParams(matchParent, wrapContent) {
+        add(preedit.ui.root, lParams(wrapContent, wrapContent) {
             above(keyboardView)
-            centerHorizontally()
+            startToStartOf(keyboardView)
+            endToEndOf(keyboardView)
+            constrainedWidth = true
+            horizontalBias = 0f
         })
         add(keyboardView, lParams(matchParent, wrapContent) {
             centerHorizontally()
@@ -563,7 +577,6 @@ class InputView(
                 endToStartOf(rightPaddingSpace)
             }
         }
-        preedit.ui.root.setPadding(sidePadding, 0, sidePadding, 0)
         kawaiiBar.view.setPadding(sidePadding, 0, sidePadding, 0)
 
         if (keyboardView.layoutParams is LayoutParams && preedit.ui.root.layoutParams is LayoutParams) {
@@ -578,12 +591,6 @@ class InputView(
                     leftMargin = nx
                     bottomMargin = ny
                 }
-                preedit.ui.root.updateLayoutParams<LayoutParams> {
-                    width = matchConstraints
-                    startToStartOf(keyboardView)
-                    endToEndOf(keyboardView)
-                    above(keyboardView)
-                }
             } else {
                 keyboardView.updateLayoutParams<LayoutParams> {
                     width = matchParent
@@ -593,11 +600,17 @@ class InputView(
                     leftMargin = 0
                     bottomMargin = 0
                 }
-                preedit.ui.root.updateLayoutParams<LayoutParams> {
-                    width = matchParent
-                    centerHorizontally()
-                    above(keyboardView)
-                }
+            }
+            val preeditLeftMargin =
+                if (floating) maxOf(sidePadding, dp(FLOATING_CORNER_DP.toInt())) else sidePadding
+            preedit.ui.root.updateLayoutParams<LayoutParams> {
+                width = wrapContent
+                constrainedWidth = true
+                horizontalBias = 0f
+                startToStartOf(keyboardView)
+                endToEndOf(keyboardView)
+                above(keyboardView)
+                leftMargin = preeditLeftMargin
             }
         }
         applyFloatingChrome()
@@ -759,6 +772,9 @@ class InputView(
             lp.bottomMargin = y
             keyboardView.layoutParams = lp
             Glass.invalidateBlur(keyboardView)
+            if (preedit.ui.root.isShown) {
+                Glass.invalidateBlur(preedit.ui.root)
+            }
         }
     }
 

@@ -4,10 +4,10 @@
  */
 package org.fcitx.fcitx5.android.ifboard
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
-import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.text.InputType
@@ -17,6 +17,7 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
@@ -32,9 +33,13 @@ import androidx.preference.PreferenceCategory
 import androidx.preference.PreferenceManager
 import androidx.preference.PreferenceViewHolder
 import androidx.preference.SwitchPreferenceCompat
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.fcitx.fcitx5.android.BuildConfig
 import org.fcitx.fcitx5.android.R
+import org.fcitx.fcitx5.android.daemon.FcitxDaemon
+import org.fcitx.fcitx5.android.input.keyboard.TypoCorrector
 import org.fcitx.fcitx5.android.ui.common.MonetBackgroundView
 import org.fcitx.fcitx5.android.ui.common.PaddingPreferenceFragment
 import org.fcitx.fcitx5.android.ui.common.WarmPaperUi
@@ -43,6 +48,9 @@ import splitties.views.topPadding
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.abs
+import kotlin.math.hypot
+import kotlin.math.roundToInt
 
 class IfboardActivity : AppCompatActivity() {
 
@@ -160,10 +168,19 @@ class IfboardFragment : PaddingPreferenceFragment() {
 
     private var urlPref: EditTextPreference? = null
     private var providerPref: WebDavProviderPreference? = null
+    private var testConnPref: Preference? = null
     private var syncNowPref: Preference? = null
+    private var touchPref: Preference? = null
+    private var smsOtpPref: SwitchPreferenceCompat? = null
     private var gramStatus: Preference? = null
     private var gramDelete: Preference? = null
     private var syncing = false
+    private var testing = false
+
+    private val smsPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+            refreshSmsSummary()
+        }
 
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         val ctx = requireContext()
@@ -174,7 +191,7 @@ class IfboardFragment : PaddingPreferenceFragment() {
         }
 
         preferenceScreen = preferenceManager.createPreferenceScreen(ctx).apply {
-            val dav = PreferenceCategory(ctx).apply { title = "WebDAV 词库同步"; isIconSpaceReserved = false }
+            val dav = PreferenceCategory(ctx).apply { title = "WebDAV 词库与习惯同步"; isIconSpaceReserved = false }
             addPreference(dav)
 
             val prov = WebDavProviderPreference(ctx).apply {
@@ -223,6 +240,46 @@ class IfboardFragment : PaddingPreferenceFragment() {
             dav.addPreference(text("ifb_webdav_password", "密码", password = true))
             dav.addPreference(text("ifb_webdav_dir", "文件夹", "Ifboard"))
 
+            val testConn = Preference(ctx).apply {
+                key = "ifb_webdav_test"
+                title = "测试连接"
+                summary = "验证 WebDAV 凭证与云端触摸习惯状态"
+                isIconSpaceReserved = false
+                setOnPreferenceClickListener {
+                    if (testing) return@setOnPreferenceClickListener true
+                    testing = true
+                    summary = "正在测试连接…"
+                    lifecycleScope.launch {
+                        try {
+                            runCatching {
+                                IfboardSync.testConnection(
+                                    sp.getString("ifb_webdav_url", IfboardSync.DEFAULT_WEBDAV_URL).orEmpty(),
+                                    sp.getString("ifb_webdav_user", "").orEmpty(),
+                                    sp.getString("ifb_webdav_password", "").orEmpty(),
+                                    sp.getString("ifb_webdav_dir", "Ifboard").orEmpty()
+                                )
+                            }.onSuccess { r ->
+                                val touchDesc = if (r.hasCloudTouchModel) {
+                                    "云端触摸习惯 ${r.cloudTouchSamples} 条样本"
+                                } else {
+                                    "云端暂无触摸习惯"
+                                }
+                                summary = "连接成功 · ${r.deviceDirs.size} 台设备，$touchDesc"
+                                Toast.makeText(ctx, summary, Toast.LENGTH_SHORT).show()
+                            }.onFailure {
+                                summary = "测试失败：${it.message ?: "请检查网络或账号"}"
+                                Toast.makeText(ctx, summary, Toast.LENGTH_LONG).show()
+                            }
+                        } finally {
+                            testing = false
+                        }
+                    }
+                    true
+                }
+            }
+            testConnPref = testConn
+            dav.addPreference(testConn)
+
             val syncNow = Preference(ctx).apply {
                 key = "ifb_webdav_sync_now"
                 title = "立即同步"
@@ -231,7 +288,7 @@ class IfboardFragment : PaddingPreferenceFragment() {
                 setOnPreferenceClickListener {
                     if (syncing) return@setOnPreferenceClickListener true
                     syncing = true
-                    summary = syncSummary(ctx, "正在同步…")
+                    summary = syncSummary(ctx, "正在同步词库与触摸习惯…")
                     lifecycleScope.launch {
                         try {
                             runCatching {
@@ -244,9 +301,11 @@ class IfboardFragment : PaddingPreferenceFragment() {
                                 )
                             }.onSuccess { r ->
                                 sp.edit().putLong("ifb_webdav_last", System.currentTimeMillis()).apply()
+                                refreshTouchSummary()
+                                val touchPart = if (r.touchSynced) "，触摸习惯已同步（${r.touchSamples} 条）" else ""
                                 Toast.makeText(
                                     ctx,
-                                    "已同步：上传 ${r.uploaded} 个，合并 ${r.downloaded} 个（${r.devices.size} 台其他设备）",
+                                    "已同步：上传 ${r.uploaded} 个，合并 ${r.downloaded} 个（${r.devices.size} 台其他设备）$touchPart",
                                     Toast.LENGTH_LONG
                                 ).show()
                             }.onFailure {
@@ -263,6 +322,70 @@ class IfboardFragment : PaddingPreferenceFragment() {
             syncNowPref = syncNow
             dav.addPreference(syncNow)
 
+            dav.addPreference(SwitchPreferenceCompat(ctx).apply {
+                key = "ifb_auto_sync_daily"
+                title = "每日自动同步"
+                summary = "开启后每 24 小时在后台自动同步 Rime 词库与触摸习惯"
+                isIconSpaceReserved = false
+                setDefaultValue(true)
+            })
+
+            val smart = PreferenceCategory(ctx).apply { title = "输入方案与智能增强"; isIconSpaceReserved = false }
+            addPreference(smart)
+
+            smart.addPreference(Preference(ctx).apply {
+                key = "ifb_rime_deploy"
+                title = "重新部署 Rime 词库"
+                summary = "立即重载输入方案配置、语法模型与同步词库"
+                isIconSpaceReserved = false
+                setOnPreferenceClickListener { pref ->
+                    pref.summary = "正在重新部署…"
+                    lifecycleScope.launch {
+                        withContext(Dispatchers.IO) {
+                            runCatching { FcitxDaemon.restartFcitx() }
+                        }
+                        pref.summary = "立即重载输入方案配置、语法模型与同步词库"
+                        Toast.makeText(ctx, "Rime 已重新部署", Toast.LENGTH_SHORT).show()
+                    }
+                    true
+                }
+            })
+
+            val touchItem = Preference(ctx).apply {
+                key = "ifb_touch_model_ctrl"
+                title = "触摸习惯模型（邻键纠错）"
+                isIconSpaceReserved = false
+                setOnPreferenceClickListener {
+                    showTouchModelDialog(ctx)
+                    true
+                }
+            }
+            touchPref = touchItem
+            smart.addPreference(touchItem)
+            refreshTouchSummary()
+
+            val smsSwitch = SwitchPreferenceCompat(ctx).apply {
+                key = "ifb_sms_otp_ctrl"
+                title = "短信验证码自动复制"
+                isIconSpaceReserved = false
+                isPersistent = false
+                isChecked = SmsCodeHelper.isEnabled(ctx)
+                setOnPreferenceChangeListener { _, newValue ->
+                    val on = newValue == true
+                    SmsCodeHelper.setEnabled(ctx, on)
+                    if (on && !SmsCodeHelper.hasSmsPermission(ctx)) {
+                        smsPermissionLauncher.launch(
+                            arrayOf(Manifest.permission.RECEIVE_SMS, Manifest.permission.READ_SMS)
+                        )
+                    }
+                    refreshSmsSummary()
+                    true
+                }
+            }
+            smsOtpPref = smsSwitch
+            smart.addPreference(smsSwitch)
+            refreshSmsSummary()
+
             val gram = PreferenceCategory(ctx).apply { title = "语法模型"; isIconSpaceReserved = false }
             addPreference(gram)
             gramStatus = Preference(ctx).apply {
@@ -276,7 +399,7 @@ class IfboardFragment : PaddingPreferenceFragment() {
                 key = "ifb_gram_update"
                 title = "检查语法模型更新"
                 isIconSpaceReserved = false
-                summary = "从万象官方发布页检查是否有新版本（GitHub 连不上时自动改用作者的国内镜像）"
+                summary = "从万象官方检查更新，支持后台保活与自动断点续传（GitHub 连不上时改用国内镜像）"
                 setOnPreferenceClickListener { checkGramUpdate(); true }
             })
             gramDelete = Preference(ctx).apply {
@@ -306,7 +429,7 @@ class IfboardFragment : PaddingPreferenceFragment() {
                 key = "ifb_check_update"
                 title = "检查更新"
                 isIconSpaceReserved = false
-                summary = "当前版本 ${BuildConfig.VERSION_NAME}"
+                summary = "当前版本 ${BuildConfig.VERSION_NAME}（仅匹配 Android 安装包）"
                 setOnPreferenceClickListener {
                     IfboardActivity.checkUpdate(requireActivity() as AppCompatActivity, verbose = true)
                     true
@@ -327,6 +450,86 @@ class IfboardFragment : PaddingPreferenceFragment() {
                     true
                 }
             })
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshTouchSummary()
+        refreshSmsSummary()
+    }
+
+    private fun refreshTouchSummary() {
+        val ctx = context ?: return
+        val m = TypoCorrector.snapshot(ctx)
+        if (m.samples == 0) {
+            touchPref?.summary = "尚未积累数据，日常打字后自动学习并可随 WebDAV 云同步"
+            return
+        }
+        var sum = 0f
+        var keys = 0
+        for (i in 0 until 26) {
+            val d = hypot(m.offX[i], m.offY[i])
+            if (d > 1e-3f) {
+                sum += d
+                keys++
+            }
+        }
+        val avg = if (keys > 0) sum / keys else 0f
+        touchPref?.summary = "已学习 ${m.samples} 次（平均偏移 ${(avg * 100).roundToInt()}% 键宽），可点击查看或重置"
+    }
+
+    private fun showTouchModelDialog(ctx: Context) {
+        val m = TypoCorrector.snapshot(ctx)
+        val msg = if (m.samples == 0) {
+            getString(R.string.touch_model_summary_empty)
+        } else {
+            val keys = (0 until 26).map { it to hypot(m.offX[it], m.offY[it]) }
+                .filter { it.second >= 0.03f }
+                .sortedByDescending { it.second }
+                .take(8)
+            if (keys.isEmpty()) {
+                getString(R.string.touch_model_centered)
+            } else {
+                buildString {
+                    append(getString(R.string.touch_model_detail_header))
+                    for ((k, _) in keys) {
+                        append('\n').append(('a' + k).uppercaseChar()).append("    ")
+                        val x = (m.offX[k] * 100).roundToInt()
+                        val y = (m.offY[k] * 100).roundToInt()
+                        val parts = ArrayList<String>(2)
+                        if (abs(x) >= 3) parts.add(getString(if (x > 0) R.string.touch_model_right else R.string.touch_model_left, abs(x)))
+                        if (abs(y) >= 3) parts.add(getString(if (y > 0) R.string.touch_model_down else R.string.touch_model_up, abs(y)))
+                        append(parts.joinToString("  "))
+                    }
+                }
+            }
+        }
+        AlertDialog.Builder(ctx)
+            .setTitle(R.string.touch_model_title)
+            .setMessage(msg)
+            .setPositiveButton(android.R.string.ok, null)
+            .apply {
+                if (m.samples > 0) {
+                    setNeutralButton(R.string.touch_model_reset) { _, _ ->
+                        TypoCorrector.resetTouchModel(ctx)
+                        refreshTouchSummary()
+                        Toast.makeText(ctx, R.string.touch_model_reset_done, Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+            .create()
+            .showWarm()
+    }
+
+    private fun refreshSmsSummary() {
+        val ctx = context ?: return
+        val enabled = SmsCodeHelper.isEnabled(ctx)
+        smsOtpPref?.isChecked = enabled
+        smsOtpPref?.summary = when {
+            !enabled -> "已关闭；开启后可自动提取短信验证码并显示在工具栏"
+            SmsCodeHelper.hasSmsPermission(ctx) -> "已就绪 · 收到验证码短信将自动复制并在工具栏一键粘贴"
+            else -> "已开启，等待授予「读取/接收短信」权限（请重新开关一次或前往系统权限管理授权）"
         }
     }
 

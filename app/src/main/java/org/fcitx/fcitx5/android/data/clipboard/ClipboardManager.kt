@@ -37,6 +37,10 @@ object ClipboardManager : ClipboardManager.OnPrimaryClipChangedListener,
         fun onUpdate(entry: ClipboardEntry)
     }
 
+    fun interface OnClipboardImageListener {
+        fun onImage(uri: android.net.Uri, mime: String, timestamp: Long)
+    }
+
     private val clipboardManager = appContext.clipboardManager
 
     private val mutex = Mutex()
@@ -44,11 +48,24 @@ object ClipboardManager : ClipboardManager.OnPrimaryClipChangedListener,
     var itemCount: Int = 0
         private set
 
+    @Volatile
+    var lastImageUri: android.net.Uri? = null
+        private set
+
+    @Volatile
+    var lastImageMime: String? = null
+        private set
+
+    @Volatile
+    var lastImageTimestamp: Long = 0L
+        private set
+
     private suspend fun updateItemCount() {
         itemCount = clbDao.itemCount()
     }
 
     private val onUpdateListeners = WeakHashSet<OnClipboardUpdateListener>()
+    private val onImageListeners = WeakHashSet<OnClipboardImageListener>()
 
     var transformer: ((String) -> String)? = null
 
@@ -58,6 +75,20 @@ object ClipboardManager : ClipboardManager.OnPrimaryClipChangedListener,
 
     fun removeOnUpdateListener(listener: OnClipboardUpdateListener) {
         onUpdateListeners.remove(listener)
+    }
+
+    fun addOnImageListener(listener: OnClipboardImageListener) {
+        onImageListeners.add(listener)
+    }
+
+    fun removeOnImageListener(listener: OnClipboardImageListener) {
+        onImageListeners.remove(listener)
+    }
+
+    fun copyPlainText(label: String, text: String) {
+        runCatching {
+            clipboardManager.setPrimaryClip(ClipData.newPlainText(label, text))
+        }.onFailure { Timber.w(it, "copyPlainText failed") }
     }
 
     private val enabledPref = AppPrefs.getInstance().clipboard.clipboardListening
@@ -203,8 +234,23 @@ object ClipboardManager : ClipboardManager.OnPrimaryClipChangedListener,
         }
         launch {
             mutex.withLock {
-                val entry = ClipboardEntry.fromClipData(clip, transformer, appContext) ?: return@withLock
+                val entry = ClipboardEntry.fromClipData(clip, transformer, appContext)
+                if (entry == null) {
+                    val imageClip = extractReadableImage(clip)
+                    if (imageClip != null) {
+                        val (uri, mime) = imageClip
+                        val ts = System.currentTimeMillis()
+                        lastImageUri = uri
+                        lastImageMime = mime
+                        lastImageTimestamp = ts
+                        if (fromListener || ts >= processStartTime - 60_000L) {
+                            onImageListeners.forEach { it.onImage(uri, mime, ts) }
+                        }
+                    }
+                    return@withLock
+                }
                 if (entry.text.isBlank()) return@withLock
+                lastImageTimestamp = 0L
                 try {
                     clbDao.find(entry.text, entry.sensitive)?.let {
                         // 主动同步发现库中已存在时，不覆盖原时间戳或重复弹出工具栏提示
@@ -237,6 +283,25 @@ object ClipboardManager : ClipboardManager.OnPrimaryClipChangedListener,
         if (toDelete.isNotEmpty()) {
             clbDao.markAsDeleted(*toDelete)
         }
+    }
+
+    private fun extractReadableImage(clip: ClipData): Pair<android.net.Uri, String>? {
+        val ownAuthority = "${appContext.packageName}.clipimage"
+        val descMimes = clip.description.let { d -> (0 until d.mimeTypeCount).map { d.getMimeType(it) } }
+        for (i in 0 until clip.itemCount) {
+            val uri = clip.getItemAt(i).uri ?: continue
+            // 跳过本输入法兜底复制回剪贴板的 FileProvider URI，避免自我循环提醒
+            if (uri.authority == ownAuthority) continue
+            val mime = appContext.contentResolver.getType(uri)
+                ?: descMimes.firstOrNull { it.startsWith("image/") }
+                ?: continue
+            if (!mime.startsWith("image/")) continue
+            val readable = runCatching {
+                appContext.contentResolver.openAssetFileDescriptor(uri, "r")?.use { true } ?: false
+            }.getOrDefault(false)
+            if (readable) return uri to mime
+        }
+        return null
     }
 
 }

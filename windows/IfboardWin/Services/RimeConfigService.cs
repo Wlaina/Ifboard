@@ -74,6 +74,10 @@ public static class RimeConfigService
             prefs.FuzzyInIng = txt.Contains("derive/ing$/in/", StringComparison.Ordinal);
             prefs.FuzzyZhChSh = txt.Contains("derive/^([zcs])h/$1/", StringComparison.Ordinal);
             prefs.GrammarEnabled = txt.Contains("language: wanxiang-lts-zh-hans", StringComparison.Ordinal);
+            if (txt.Contains("translator/enable_correction: false", StringComparison.Ordinal))
+                prefs.EnableCorrection = false;
+            else if (txt.Contains("translator/enable_correction: true", StringComparison.Ordinal))
+                prefs.EnableCorrection = true;
         }
 
         if (File.Exists(Paths.FlypyCustomYaml))
@@ -189,6 +193,7 @@ public static class RimeConfigService
 
         if (prefs.GrammarEnabled)
             AppendGrammarPatch(sb);
+        sb.AppendLine($"  translator/enable_correction: {(prefs.EnableCorrection ? "true" : "false")}");
 
         if (prefs.FuzzyEnEng || prefs.FuzzyInIng || prefs.FuzzyZhChSh)
         {
@@ -222,6 +227,7 @@ public static class RimeConfigService
 
         if (prefs.GrammarEnabled)
             AppendGrammarPatch(sb);
+        sb.AppendLine($"  translator/enable_correction: {(prefs.EnableCorrection ? "true" : "false")}");
 
         sb.AppendLine("  switches:");
         sb.AppendLine("    - name: ascii_mode");

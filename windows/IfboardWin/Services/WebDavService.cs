@@ -15,7 +15,7 @@ public static class WebDavService
     public const string ProjectHomeUrl = "https://github.com/Wlaina/Ifboard";
 
     public const string DefaultAppReleaseApi =
-        "https://api.github.com/repos/Wlaina/Ifboard/releases/latest";
+        "https://api.github.com/repos/Wlaina/Ifboard/releases?per_page=10";
 
     private sealed record DavEntry(string Name, bool IsDirectory, long Size, DateTimeOffset LastModified);
 
@@ -195,10 +195,12 @@ public static class WebDavService
             .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
             .ToList();
         var hasProfile = items.Any(i => i.IsDirectory && i.Name == "_pc_profile");
+        var touchSamples = await TryReadRemoteTouchModelSamplesAsync(http, baseUrl, ct);
         var listStr = deviceNames.Count > 0 ? $"（{string.Join(" · ", deviceNames)}）" : "";
+        var touchStr = touchSamples > 0 ? $" · 手机触摸习惯（{touchSamples} 样本）" : "";
         return hasProfile
-            ? $"连接成功：云端已存在 {deviceNames.Count} 台同步设备{listStr} 与个人配置快照"
-            : $"连接成功：云端已存在 {deviceNames.Count} 台同步设备{listStr}";
+            ? $"连接成功：云端已存在 {deviceNames.Count} 台同步设备{listStr} 与个人配置快照{touchStr}"
+            : $"连接成功：云端已存在 {deviceNames.Count} 台同步设备{listStr}{touchStr}";
     }
 
     public static async Task<SyncResult> SyncUserDbAsync(
@@ -278,9 +280,10 @@ public static class WebDavService
             progress?.Report("4/4 云端暂无更多其他设备词库需要合并");
         }
 
+        var touchSamples = await TryReadRemoteTouchModelSamplesAsync(http, remoteRoot, ct);
         cfg.LastSyncUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         SaveConfig(cfg);
-        return new SyncResult(uploaded, downloaded, otherDevices);
+        return new SyncResult(uploaded, downloaded, otherDevices, touchSamples);
     }
 
     public static async Task<ProfileTransferResult> BackupProfileAsync(
@@ -539,18 +542,79 @@ public static class WebDavService
             }
 
             using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
-            var tag = doc.RootElement.TryGetProperty("tag_name", out var t) ? t.GetString() : null;
-            var htmlUrl = doc.RootElement.TryGetProperty("html_url", out var h) ? h.GetString() : null;
+            JsonElement? matchedRelease = null;
+            if (doc.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var rel in doc.RootElement.EnumerateArray())
+                {
+                    if (IsWindowsRelease(rel))
+                    {
+                        matchedRelease = rel;
+                        break;
+                    }
+                }
+            }
+            else if (doc.RootElement.ValueKind == JsonValueKind.Object && IsWindowsRelease(doc.RootElement))
+            {
+                matchedRelease = doc.RootElement;
+            }
+
+            if (matchedRelease is null)
+                return (true, $"当前版本：v{Paths.AppVersion}（暂未检测到更高 Windows 公开版）", null);
+
+            var chosen = matchedRelease.Value;
+            var tag = chosen.TryGetProperty("tag_name", out var t) ? t.GetString() : null;
+            var htmlUrl = chosen.TryGetProperty("html_url", out var h) ? h.GetString() : null;
             if (string.IsNullOrWhiteSpace(tag))
                 return (true, $"当前版本：v{Paths.AppVersion}", null);
 
             var cleanTag = tag.Trim().TrimStart('v', 'V').Split('-', '+')[0];
             var currentVer = Version.Parse(Paths.AppVersion);
             if (Version.TryParse(cleanTag, out var remoteVer) && remoteVer > currentVer)
-                return (true, $"发现新版本：{tag}（当前本地 v{Paths.AppVersion}）", htmlUrl);
+                return (true, $"发现 Windows 新版本：{tag}（当前本地 v{Paths.AppVersion}）", htmlUrl);
 
-            return (true, $"当前已是最新版本：{tag}（本地 v{Paths.AppVersion}）", null);
+            return (true, $"当前已是 Windows 最新版本：{tag}（本地 v{Paths.AppVersion}）", null);
         }
+    }
+
+    private static bool IsWindowsRelease(JsonElement release)
+    {
+        if (release.TryGetProperty("draft", out var d) && d.ValueKind == JsonValueKind.True)
+            return false;
+        if (release.TryGetProperty("prerelease", out var p) && p.ValueKind == JsonValueKind.True)
+            return false;
+        if (!release.TryGetProperty("assets", out var assets) || assets.ValueKind != JsonValueKind.Array)
+            return false;
+
+        foreach (var asset in assets.EnumerateArray())
+        {
+            var name = asset.TryGetProperty("name", out var n) ? n.GetString() : null;
+            if (!string.IsNullOrEmpty(name) && name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    private static async Task<int> TryReadRemoteTouchModelSamplesAsync(HttpClient http, string remoteRoot, CancellationToken ct)
+    {
+        try
+        {
+            using var resp = await http.GetAsync($"{remoteRoot}/_touch_model/touch_model.json", ct);
+            if (!resp.IsSuccessStatusCode) return 0;
+            var json = await resp.Content.ReadAsStringAsync(ct);
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty("samples", out var s) && s.TryGetInt32(out var count))
+                return Math.Max(0, count);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            // 云端无 _touch_model 目录或暂不可读时静默忽略
+        }
+        return 0;
     }
 
     #endregion

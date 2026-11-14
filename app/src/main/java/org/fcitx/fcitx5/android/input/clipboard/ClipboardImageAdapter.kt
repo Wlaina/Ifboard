@@ -224,6 +224,98 @@ object ClipboardImages {
         return result
     }
 
+    fun interface OnScreenshotListener {
+        fun onScreenshot(image: ClipboardImage)
+    }
+
+    private val screenshotListeners = org.fcitx.fcitx5.android.utils.WeakHashSet<OnScreenshotListener>()
+
+    @Volatile
+    var lastDetectedScreenshot: ClipboardImage? = null
+        private set
+
+    @Volatile
+    private var dismissedQuickUri: String? = null
+
+    fun addOnScreenshotListener(l: OnScreenshotListener) {
+        synchronized(screenshotListeners) { screenshotListeners.add(l) }
+    }
+
+    fun removeOnScreenshotListener(l: OnScreenshotListener) {
+        synchronized(screenshotListeners) { screenshotListeners.remove(l) }
+    }
+
+    fun markQuickSuggestedUsed(uri: Uri) {
+        dismissedQuickUri = uri.toString()
+    }
+
+    fun isQuickSuggestionAvailable(uri: Uri): Boolean =
+        dismissedQuickUri != uri.toString()
+
+    /** 仅查询最新一张未过期、已落盘且未被屏蔽的截屏（供工具栏快捷粘贴用，必须在非主线程调用） */
+    fun queryLatestScreenshot(ctx: Context, maxAgeMs: Long = 5 * 60_000L): ClipboardImage? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || !hasMediaPermission(ctx)) return null
+        val sp = PreferenceManager.getDefaultSharedPreferences(ctx)
+        val dismissState = readDismissState(sp)
+        return runCatching {
+            val collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+            val projection = arrayOf(
+                MediaStore.Images.Media._ID,
+                MediaStore.Images.Media.MIME_TYPE,
+                MediaStore.Images.Media.DATE_ADDED
+            )
+            val sinceSec = (System.currentTimeMillis() - maxAgeMs) / 1000
+            val selection =
+                "(${MediaStore.Images.Media.RELATIVE_PATH} LIKE ? OR ${MediaStore.Images.Media.RELATIVE_PATH} LIKE ?) AND ${MediaStore.Images.Media.DATE_ADDED} >= ? AND ${MediaStore.MediaColumns.IS_PENDING} = 0"
+            val args = arrayOf("%Screenshots%", "%截屏%", sinceSec.toString())
+            ctx.contentResolver.query(
+                collection, projection, selection, args,
+                "${MediaStore.Images.Media.DATE_ADDED} DESC"
+            )?.use { c ->
+                val idCol = c.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+                val mimeCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.MIME_TYPE)
+                val dateCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
+                while (c.moveToNext()) {
+                    val ts = c.getLong(dateCol) * 1000L
+                    val uri = Uri.withAppendedPath(collection, c.getLong(idCol).toString())
+                    if (shouldFilterImage(uri.toString(), ts, isFromClipboard = false, dismissState)) continue
+                    val readable = runCatching {
+                        ctx.contentResolver.openAssetFileDescriptor(uri, "r")?.use { true } ?: false
+                    }.getOrDefault(false)
+                    if (!readable) continue
+                    return@runCatching ClipboardImage(uri, c.getString(mimeCol) ?: "image/png", false, ts)
+                }
+                null
+            }
+        }.onFailure { Timber.w(it, "Failed to query latest screenshot") }.getOrNull()
+    }
+
+    /** 媒体库变化后检查新截屏并通知工具栏（必须在非主线程调用） */
+    fun checkAndNotifyScreenshot(ctx: Context, maxAgeMs: Long = 90_000L) {
+        val img = queryLatestScreenshot(ctx, maxAgeMs) ?: return
+        val uriStr = img.uri.toString()
+        if (lastDetectedScreenshot?.uri == img.uri || dismissedQuickUri == uriStr) return
+        lastDetectedScreenshot = img
+        val snapshot = synchronized(screenshotListeners) { screenshotListeners.toList() }
+        snapshot.forEach {
+            runCatching { it.onScreenshot(img) }.onFailure { t -> Timber.w(t) }
+        }
+    }
+
+    /** 离屏加载指定尺寸的缩略图（必须在非主线程调用） */
+    fun loadThumbnailBitmap(ctx: Context, uri: Uri, sizePx: Int = 96): Bitmap? = runCatching {
+        val qThumb = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            runCatching { ctx.contentResolver.loadThumbnail(uri, Size(sizePx, sizePx), null) }.getOrNull()
+        } else {
+            null
+        }
+        qThumb ?: ctx.contentResolver.openInputStream(uri)?.use {
+            android.graphics.BitmapFactory.decodeStream(
+                it, null, android.graphics.BitmapFactory.Options().apply { inSampleSize = 8 }
+            )
+        }
+    }.onFailure { Timber.w(it, "thumbnail decode failed") }.getOrNull()
+
     /** Copy [src] into our own FileProvider so the target app can be granted access. */
     private fun shareableUri(ctx: Context, src: Uri, mime: String): Uri {
         val dir = File(ctx.cacheDir, "clip_images").apply { mkdirs() }

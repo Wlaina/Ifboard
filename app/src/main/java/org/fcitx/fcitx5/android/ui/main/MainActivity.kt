@@ -136,6 +136,7 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         promptBackgroundStart()
         if (bgStartDialog?.isShowing != true) promptGrammarModel()
+        org.fcitx.fcitx5.android.ifboard.IfboardSync.maybeAutoSync(applicationContext)
     }
 
     private var gramDialog: androidx.appcompat.app.AlertDialog? = null
