@@ -25,6 +25,7 @@ import androidx.annotation.FloatRange
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.view.updateLayoutParams
 import org.fcitx.fcitx5.android.R
+import org.fcitx.fcitx5.android.data.prefs.AppPrefs
 import org.fcitx.fcitx5.android.data.theme.Theme
 import org.fcitx.fcitx5.android.data.theme.ThemeManager
 import org.fcitx.fcitx5.android.data.theme.ThemePrefs.PunctuationPosition
@@ -66,6 +67,13 @@ abstract class KeyView(ctx: Context, val theme: Theme, val def: KeyDef.Appearanc
     private val isPill: Boolean
     private val hasExplicitMarginOverride: Boolean
 
+    protected fun isLandscapeFor(orientation: Int = resources.configuration.orientation): Boolean =
+        orientation == Configuration.ORIENTATION_LANDSCAPE &&
+                !AppPrefs.getInstance().keyboard.floatingKeyboard.getValue()
+
+    protected val isLandscapeMode: Boolean
+        get() = isLandscapeFor()
+
     init {
         val prefs = ThemeManager.prefs
         bordered = prefs.keyBorder.getValue()
@@ -75,7 +83,7 @@ abstract class KeyView(ctx: Context, val theme: Theme, val def: KeyDef.Appearanc
         isPill = def.viewId == R.id.button_return ||
                 (def is KeyDef.Appearance.Text && def.displayText in setOf("?123", "ABC", "返回"))
         radius = if (isPill) dp(100f) else dp(prefs.keyRadius.getValue().toFloat())
-        val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val landscape = isLandscapeMode
         val hMarginPref =
             if (landscape) prefs.keyHorizontalMarginLandscape else prefs.keyHorizontalMargin
         val vMarginPref =
@@ -163,7 +171,11 @@ abstract class KeyView(ctx: Context, val theme: Theme, val def: KeyDef.Appearanc
         val targetH = if (!def.margin) 0 else if (hasExplicitMarginOverride) hMargin else hMarginPx
         val targetV = if (!def.margin) 0 else if (hasExplicitMarginOverride) vMargin else vMarginPx
         val targetR = if (isPill) dp(100f) else radiusPx
-        if (targetH == hMargin && targetV == vMargin && targetR == radius) return
+        if (targetH == hMargin && targetV == vMargin && targetR == radius) {
+            // 横屏切换悬浮模式时边距配置可能碰巧相等，仍需刷新副标与上下间距布局
+            onMarginsUpdated()
+            return
+        }
         hMargin = targetH
         vMargin = targetV
         radius = targetR
@@ -424,9 +436,10 @@ class AltTextKeyView(ctx: Context, theme: Theme, def: KeyDef.Appearance.AltText)
 
     private fun applyLayout(orientation: Int) {
         when (ThemeManager.prefs.punctuationPosition.getValue()) {
-            PunctuationPosition.Bottom -> when (orientation) {
-                Configuration.ORIENTATION_LANDSCAPE -> applyTopRightAltTextPosition()
-                else -> applyBottomAltTextPosition()
+            PunctuationPosition.Bottom -> if (isLandscapeFor(orientation)) {
+                applyTopRightAltTextPosition()
+            } else {
+                applyBottomAltTextPosition()
             }
             PunctuationPosition.TopRight -> applyTopRightAltTextPosition()
             PunctuationPosition.None -> applyNoAltTextPosition()
@@ -505,22 +518,19 @@ class ImageTextKeyView(ctx: Context, theme: Theme, def: KeyDef.Appearance.ImageT
     }
 
     private fun updateMargins(orientation: Int) {
-        when (orientation) {
-            Configuration.ORIENTATION_LANDSCAPE -> {
-                mainText.updateLayoutParams<ConstraintLayout.LayoutParams> {
-                    bottomMargin = vMargin + dp(2)
-                }
-                img.updateLayoutParams<ConstraintLayout.LayoutParams> {
-                    topMargin = vMargin + dp(4)
-                }
+        if (isLandscapeFor(orientation)) {
+            mainText.updateLayoutParams<ConstraintLayout.LayoutParams> {
+                bottomMargin = vMargin + dp(2)
             }
-            else -> {
-                mainText.updateLayoutParams<ConstraintLayout.LayoutParams> {
-                    bottomMargin = vMargin + dp(4)
-                }
-                img.updateLayoutParams<ConstraintLayout.LayoutParams> {
-                    topMargin = vMargin + dp(8)
-                }
+            img.updateLayoutParams<ConstraintLayout.LayoutParams> {
+                topMargin = vMargin + dp(4)
+            }
+        } else {
+            mainText.updateLayoutParams<ConstraintLayout.LayoutParams> {
+                bottomMargin = vMargin + dp(4)
+            }
+            img.updateLayoutParams<ConstraintLayout.LayoutParams> {
+                topMargin = vMargin + dp(8)
             }
         }
     }

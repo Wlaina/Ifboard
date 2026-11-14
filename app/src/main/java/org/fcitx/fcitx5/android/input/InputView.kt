@@ -240,16 +240,22 @@ class InputView(
 
     private val floatingWidthPx: Int
         get() {
-            val parentW = availableWidthPx
-            return if (isLandscape) {
-                (parentW * 0.48f).toInt().coerceIn(minOf(dp(280), parentW), maxOf(minOf(dp(280), parentW), dp(380)))
-            } else {
-                (parentW * 0.85f).toInt().coerceIn(minOf(dp(280), parentW), maxOf(minOf(dp(280), parentW), dp(344)))
-            }
+            val dm = resources.displayMetrics
+            return KeyboardLayoutMetrics.computeFloatingWidthPx(
+                availableWidthPx = availableWidthPx,
+                displayWidthPx = dm.widthPixels,
+                displayHeightPx = dm.heightPixels,
+                dp280Px = dp(280),
+                dp344Px = dp(344)
+            )
         }
 
     private val floatingKeyboardHeightPx: Int
-        get() = (keyboardHeightPx * 0.84f).toInt().coerceAtLeast(minOf(keyboardHeightPx, dp(150)))
+        get() {
+            val portraitHeightPx = keyboardHeightPercentBase.getValue()
+                .computeKeyboardHeightPx(context, keyboardHeightPercent.getValue(), landscape = false)
+            return KeyboardLayoutMetrics.computeFloatingKeyboardHeightPx(portraitHeightPx, dp(150))
+        }
 
     private val keyboardSidePaddingPx: Int
         get() {
@@ -480,16 +486,16 @@ class InputView(
 
     private fun currentSidePaddingPx(floating: Boolean = isFloating): Int =
         if (floating) {
-            KeyboardLayoutMetrics.computeFloatingSidePaddingPx(keyboardSidePaddingPx, dp(5), dp(7))
+            KeyboardLayoutMetrics.computeFloatingSidePaddingPx(dp(keyboardSidePadding.getValue()), dp(5), dp(7))
         } else {
             keyboardSidePaddingPx
         }
 
-    private fun currentBarHeightPx(): Int =
-        dp(KeyboardLayoutMetrics.barHeightDp(isLandscape))
+    private fun currentBarHeightPx(floating: Boolean = isFloating): Int =
+        dp(KeyboardLayoutMetrics.barHeightDp(isLandscape && !floating))
 
     private fun currentTopPaddingPx(floating: Boolean = isFloating): Int {
-        if (isLandscape) return 0
+        if (isLandscape && !floating) return 0
         val sidePadding = currentSidePaddingPx(floating)
         val hostWidthPx = if (floating) floatingWidthPx else availableWidthPx
         val density = resources.displayMetrics.density
@@ -511,7 +517,7 @@ class InputView(
         applyBottomInsetMode()
         val floating = isFloating
         val sidePadding = currentSidePaddingPx(floating)
-        val barHeightPx = currentBarHeightPx()
+        val barHeightPx = currentBarHeightPx(floating)
         kawaiiBar.view.layoutParams?.let { lp ->
             if (lp.height != barHeightPx) {
                 lp.height = barHeightPx
@@ -718,7 +724,7 @@ class InputView(
         if (keyboardView.height > 0 && keyboardView.width == cardW) {
             keyboardView.height
         } else {
-            floatingKeyboardHeightPx + currentBarHeightPx() + currentTopPaddingPx(floating = true) + dp(FLOATING_HANDLE_HEIGHT_DP)
+            floatingKeyboardHeightPx + currentBarHeightPx(floating = true) + currentTopPaddingPx(floating = true) + dp(FLOATING_HANDLE_HEIGHT_DP)
         }
 
     private fun clampFloatingPosition(x: Int, y: Int, cardW: Int = floatingWidthPx): Pair<Int, Int> {
@@ -726,7 +732,13 @@ class InputView(
         val pad = dp(4)
         val maxX = (availableWidthPx - cardW - pad).coerceAtLeast(pad)
         val minY = maxOf(navSafeBottomInsetPx, pad)
-        val maxY = (availableHeightPx - actualH - statusBarTopInsetPx - dp(8)).coerceAtLeast(minY)
+        val topInset = if (isAttachedToWindow) {
+            getLocationOnScreen(touchLoc)
+            (statusBarTopInsetPx - touchLoc[1]).coerceAtLeast(0)
+        } else {
+            statusBarTopInsetPx
+        }
+        val maxY = (availableHeightPx - actualH - topInset - dp(8)).coerceAtLeast(minY)
         return x.coerceIn(pad, maxX) to y.coerceIn(minY, maxY)
     }
 
@@ -807,9 +819,7 @@ class InputView(
         if (w > 0 && h > 0 && (w != lastParentW || h != lastParentH)) {
             lastParentW = w
             lastParentH = h
-            if (isFloating) {
-                post { if (isAttachedToWindow) updateKeyboardSize() }
-            }
+            post { if (isAttachedToWindow) updateKeyboardSize() }
         }
     }
 

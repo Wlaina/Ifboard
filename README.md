@@ -19,8 +19,12 @@
 **输入**
 - **Rime 内置**：雾凇拼音的词库、Lua、OpenCC 和方案全部打包，装好即用。
 - **语法模型按需下载**：万象 LTS 语法模型从[官方发布页](https://github.com/amzxyz/rime-wanxiang-data/releases/tag/LTS)下载，支持断点续传和 sha256 校验，可以一键检查更新。因为模型不打进 APK，安装包只有约 68 MB。
-- **滑行输入**：全拼、小鹤双拼和英文都支持。手指划过字母即可输入，带渐隐的锥形轨迹，滑行期间工具栏实时显示拼音。解码器参考 SHARK2 论文的思路自己实现，没有使用其他输入法的代码。
-- **小鹤双拼邻键纠错**：按偏旁键（如将 `guge` 误按成 `gige`）时按按键物理比例计算容错候选，并确保全有效双拼码保持原生候选不误触发。
+- **滑行输入**：全拼、小鹤双拼和英文都支持。手指划过字母即可输入，带渐隐的锥形轨迹，滑行期间工具栏实时显示拼音。上屏后其他可能的词留在候选栏，点一下即可改选（中文插在 Rime 首选之后，英文在工具栏直接替换刚滑出的词）。英文按真实词频排序。解码器参考 SHARK2 论文的思路自己实现，没有使用其他输入法的代码。
+- **邻键纠错**：
+  - 小鹤双拼按「触点概率空间模型 + 词频」做贝叶斯解码（思路参考 Goodman 2002、Weir et al. CHI 2014、VelociTap CHI 2015），一个词里多处误触也能一起纠正（如 `gihe` → 谷歌）；
+  - 原串不合法时纠错直接置顶，原串合法时只在触点落在键边缘且纠错词明显更可能时才插到第 2 位；
+  - 会在本机学习你在每个键上的习惯落点偏移，越用越准（不上传、不同步）；
+  - 同时开启 librime 自带的整句邻键纠错（`translator/enable_correction`），覆盖长句输入。
 - **英文**：调用系统拼写检查自动纠错（可关），可选自动大写、双击空格输入句号。
 
 **外观与手感**
@@ -70,5 +74,6 @@ SIGN_ENV=/path/to/sign.env RIME_ICE_DIR=/path/to/rime-ice INCLUDE_USERDB=0 bash 
 - [fcitx5-android](https://github.com/fcitx5-android/fcitx5-android)、[fcitx5-rime](https://github.com/fcitx/fcitx5-rime)、[librime](https://github.com/rime/librime)、[librime-octagram](https://github.com/lotem/librime-octagram)
 - [雾凇拼音 rime-ice](https://github.com/iDvel/rime-ice)（GPL-3.0，包括 `ifboard/data/rime_ice.schema.yaml`）
 - [万象语法模型 rime-wanxiang-data](https://github.com/amzxyz/rime-wanxiang-data)（不随 APK 分发，由用户从官方发布页下载）
+- 英文词频 `ifboard/data/ifb_en_freq.tsv` 取自 [AOSP LatinIME](https://android.googlesource.com/platform/packages/inputmethods/LatinIME/) 的 `en_US_wordlist`（Apache-2.0，已去除冒犯性词条，见 `ifboard/data/NOTICE.LatinIME`）
 - [Google Sans](https://github.com/googlefonts/googlesans)（SIL OFL 1.1）、[Material Symbols](https://github.com/google/material-design-icons)（Apache-2.0）
 - 本项目与 Google、Gboard 无关；"Gboard" 仅用于描述参照的外观。

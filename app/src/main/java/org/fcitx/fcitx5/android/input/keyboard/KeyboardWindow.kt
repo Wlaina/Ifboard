@@ -103,6 +103,11 @@ class KeyboardWindow : InputWindow.SimpleInputWindow<KeyboardWindow>(), Essentia
             }
             else -> {}
         }
+        // a new key after an English glide: its replacement suggestions are gone
+        if (glideAltWord != null) {
+            glideAltWord = null
+            bar.clearGlideCandidates()
+        }
         if (englishAssist.beforeKeyAction(it)) return@KeyActionListener
         if (it is KeyAction.GlideWordAction) {
             // Gboard: a glided word gets a space in front when it follows another word
@@ -111,6 +116,10 @@ class KeyboardWindow : InputWindow.SimpleInputWindow<KeyboardWindow>(), Essentia
             commonKeyActionListener.listener.onKeyAction(
                 KeyAction.CommitAction(if (space) " ${it.word}" else it.word), source
             )
+            if (it.alternates.isNotEmpty()) {
+                glideAltWord = it.word
+                bar.showGlideAlternates(it.word, it.alternates) { alt -> replaceGlidedWord(alt) }
+            }
             return@KeyActionListener
         }
         if (it is KeyAction.LayoutSwitchAction) {
@@ -118,6 +127,22 @@ class KeyboardWindow : InputWindow.SimpleInputWindow<KeyboardWindow>(), Essentia
         } else {
             commonKeyActionListener.listener.onKeyAction(it, source)
         }
+    }
+
+    // the last English glided word while its alternates are shown in the bar
+    private var glideAltWord: String? = null
+
+    private fun replaceGlidedWord(alt: String) {
+        val old = glideAltWord ?: return
+        glideAltWord = null
+        bar.clearGlideCandidates()
+        val ic = service.currentInputConnection ?: return
+        // only replace when the cursor is still right after the glided word
+        if (ic.getTextBeforeCursor(old.length, 0)?.toString() != old) return
+        ic.beginBatchEdit()
+        ic.deleteSurroundingText(old.length, 0)
+        ic.commitText(alt, 1)
+        ic.endBatchEdit()
     }
 
     private val popupActionListener: PopupActionListener by lazy {
@@ -181,6 +206,10 @@ class KeyboardWindow : InputWindow.SimpleInputWindow<KeyboardWindow>(), Essentia
             else -> TextKeyboard.Name
         }
         switchLayout(targetLayout, remember = false)
+        if (glideAltWord != null) {
+            glideAltWord = null
+            bar.clearGlideCandidates()
+        }
         ContextCompat.getMainExecutor(service).execute { updateAutoCaps() }
     }
 
@@ -214,6 +243,7 @@ class KeyboardWindow : InputWindow.SimpleInputWindow<KeyboardWindow>(), Essentia
 
     override fun onDetached() {
         preedit.showGlidePreview("")
+        glideAltWord = null
         bar.clearGlideCandidates()
         currentKeyboard?.let {
             it.onDetach()

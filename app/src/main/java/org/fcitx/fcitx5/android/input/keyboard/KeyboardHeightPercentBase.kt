@@ -23,12 +23,15 @@ enum class KeyboardHeightPercentBase(override val stringRes: Int) : ManagedPrefe
 
     /** 计算给定百分比与屏幕方向下的按键区域高度（像素）。 */
     fun computeKeyboardHeightPx(context: Context, percent: Int, landscape: Boolean): Int {
+        val dm = context.resources.displayMetrics
         if (this == Gboard) {
-            val dm = context.resources.displayMetrics
-            return computeGboardHeightPx(dm.density, dm.ydpi, percent, landscape)
+            // 横屏下读取竖屏高度（悬浮模式）时切换为 xdpi，与竖屏实测 ydpi 一致
+            val currentLandscape = dm.widthPixels > dm.heightPixels && dm.heightPixels > 0
+            val targetYdpi = if (currentLandscape == landscape) dm.ydpi else dm.xdpi
+            return computeGboardHeightPx(dm.density, targetYdpi, percent, landscape)
         }
-        val base = when (this) {
-            DisplayMetrics -> context.resources.displayMetrics.heightPixels
+        val (w, h) = when (this) {
+            DisplayMetrics -> dm.widthPixels to dm.heightPixels
             RealSize -> Point().also {
                 @Suppress("DEPRECATION")
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -36,9 +39,10 @@ enum class KeyboardHeightPercentBase(override val stringRes: Int) : ManagedPrefe
                 } else {
                     context.windowManager.defaultDisplay
                 }.getRealSize(it)
-            }.y
+            }.let { it.x to it.y }
             Gboard -> error("unreachable")
         }
+        val base = if (landscape) minOf(w, h) else maxOf(w, h)
         return base * percent / 100
     }
 

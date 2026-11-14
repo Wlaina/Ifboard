@@ -121,4 +121,30 @@ class KeyboardLayoutMetricsTest {
         assertEquals(18, KeyboardLayoutMetrics.computeFloatingSidePaddingPx(18, 15, 21))
         assertEquals(21, KeyboardLayoutMetrics.computeFloatingSidePaddingPx(30, 15, 21))
     }
+
+    @Test
+    fun floating_dimensions_stay_identical_between_portrait_and_landscape() {
+        val portraitWidth = KeyboardLayoutMetrics.computeFloatingWidthPx(
+            availableWidthPx = 1200,
+            displayWidthPx = 1200,
+            displayHeightPx = 2670,
+            dp280Px = 840,
+            dp344Px = 1032
+        )
+        val landscapeWidth = KeyboardLayoutMetrics.computeFloatingWidthPx(
+            availableWidthPx = 2670,
+            displayWidthPx = 2670,
+            displayHeightPx = 1200,
+            dp280Px = 840,
+            dp344Px = 1032
+        )
+        assertEquals(1020, portraitWidth)
+        assertEquals(portraitWidth, landscapeWidth)
+
+        val floatingKeyHeight = KeyboardLayoutMetrics.computeFloatingKeyboardHeightPx(
+            portraitKeyboardHeightPx = 708,
+            dp150Px = 450
+        )
+        assertEquals(594, floatingKeyHeight)
+    }
 }

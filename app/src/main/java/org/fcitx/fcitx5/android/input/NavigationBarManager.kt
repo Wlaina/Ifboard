@@ -8,6 +8,7 @@ package org.fcitx.fcitx5.android.input
 import android.graphics.Color
 import android.os.Build
 import android.view.Window
+import android.view.WindowManager
 import androidx.annotation.ColorInt
 import androidx.core.view.WindowCompat
 import org.fcitx.fcitx5.android.data.prefs.AppPrefs
@@ -77,7 +78,24 @@ class NavigationBarManager {
         }
     }
 
+    private fun Window.allowDisplayCutout() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            } else {
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+            if (attributes.layoutInDisplayCutoutMode != mode) {
+                attributes = attributes.apply {
+                    layoutInDisplayCutoutMode = mode
+                }
+            }
+        }
+    }
+
     fun evaluate(window: Window, isVirtualKeyboard: Boolean) {
+        // 允许输入法窗口横屏时延伸到刘海/挖孔区域，保证背景与键位对称覆盖全宽
+        window.allowDisplayCutout()
         if (isVirtualKeyboard && floatingKeyboard) {
             // Floating keyboard does not dock against the navbar: keep it completely transparent
             shouldUpdateNavbarForeground = false

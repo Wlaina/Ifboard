@@ -526,6 +526,18 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
         animator.visibility = if (show) View.INVISIBLE else View.VISIBLE
     }
 
+    /** after an English glide: [current] highlighted, tapping one of [alternates] replaces it */
+    fun showGlideAlternates(current: String, alternates: List<String>, onPick: (String) -> Unit) {
+        showGlideCandidates(listOf(current) + alternates)
+        for (i in 1 until glidePreviewRow.childCount) {
+            val v = glidePreviewRow.getChildAt(i)
+            val word = alternates[i - 1]
+            v.isClickable = true
+            v.setOnClickListener { onPick(word) }
+        }
+        glidePreviewRow.getChildAt(0)?.setOnClickListener { clearGlideCandidates() }
+    }
+
     fun clearGlideCandidates() {
         glidePreviewBar.visibility = View.GONE
         animator.visibility = View.VISIBLE

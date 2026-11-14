@@ -53,6 +53,29 @@ object KeyboardLayoutMetrics {
         dp7Px: Int
     ): Int = baseSidePaddingPx.coerceIn(dp5Px, dp7Px)
 
+    /** 悬浮窗口宽度（px）：横竖屏统一按屏幕短边（竖屏宽度）的 85% 计算并限制在 [280dp, 344dp]，保持横竖屏比例一致。 */
+    fun computeFloatingWidthPx(
+        availableWidthPx: Int,
+        displayWidthPx: Int,
+        displayHeightPx: Int,
+        dp280Px: Int,
+        dp344Px: Int
+    ): Int {
+        val portraitWidthPx = minOf(displayWidthPx, displayHeightPx).let {
+            if (it > 0) it else availableWidthPx
+        }
+        val minBoundPx = minOf(dp280Px, availableWidthPx)
+        val maxBoundPx = maxOf(minBoundPx, dp344Px)
+        return (portraitWidthPx * 0.85f).toInt().coerceIn(minBoundPx, maxBoundPx)
+    }
+
+    /** 悬浮窗口按键区域高度（px）：横竖屏统一基于竖屏按键区高度的 0.84x 计算。 */
+    fun computeFloatingKeyboardHeightPx(
+        portraitKeyboardHeightPx: Int,
+        dp150Px: Int
+    ): Int = (portraitKeyboardHeightPx * 0.84f).toInt()
+        .coerceAtLeast(minOf(portraitKeyboardHeightPx, dp150Px))
+
     /**
      * 根据容器实际宽度（dp）和行数解析按键有效边距与圆角：
      * - 横屏或宽屏（>= 380dp）：1:1 遵循设置值

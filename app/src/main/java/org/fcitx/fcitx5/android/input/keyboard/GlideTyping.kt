@@ -13,6 +13,7 @@ package org.fcitx.fcitx5.android.input.keyboard
 import android.content.Context
 import timber.log.Timber
 import java.io.BufferedReader
+import java.io.InputStream
 import java.io.InputStreamReader
 import java.util.PriorityQueue
 import java.util.concurrent.ConcurrentHashMap
@@ -60,6 +61,31 @@ object GlideTyping {
         val validSyllables: HashSet<String>? = null
     )
 
+    /** scoring weights of the fine pass; tuned offline with GlideBenchmarkTest */
+    internal class Weights {
+        @JvmField var loc = 1.0f
+        @JvmField var shp = 1.0f
+        @JvmField var trace = 2.8f
+        @JvmField var miss = 3.2f
+        @JvmField var end = 1.65f
+        @JvmField var len = 2.4f
+        @JvmField var freqFlypy = 0.34f
+        @JvmField var freqPinyin = 0.32f
+        @JvmField var freqEnglish = 0.60f
+        @JvmField var coarseLimit = 120
+        @JvmField var coarseFreq = 0.30f
+        fun copy() = Weights().also {
+            it.loc = loc; it.shp = shp; it.trace = trace; it.miss = miss; it.end = end; it.len = len
+            it.freqFlypy = freqFlypy; it.freqPinyin = freqPinyin; it.freqEnglish = freqEnglish
+            it.coarseLimit = coarseLimit; it.coarseFreq = coarseFreq
+        }
+        override fun toString() = "loc=$loc shp=$shp trace=$trace miss=$miss end=$end len=$len " +
+            "fF=$freqFlypy fP=$freqPinyin fE=$freqEnglish coarse=$coarseLimit cF=$coarseFreq"
+    }
+
+    @Volatile
+    internal var w = Weights()
+
     private const val M = 28
     private const val DTW_BAND = 5
     private const val NEAR = 1.65f
@@ -75,6 +101,12 @@ object GlideTyping {
     private var english: Dict? = null
     private val loading = HashSet<Mode>()
     private val executor = Executors.newSingleThreadExecutor { Thread(it, "glide-dict").apply { priority = Thread.MIN_PRIORITY } }
+
+    internal fun dictFor(mode: Mode): Dict? = when (mode) {
+        Mode.Pinyin -> pinyin
+        Mode.Flypy -> flypyDict
+        Mode.English -> english
+    }
 
     fun isReady(mode: Mode) = when (mode) {
         Mode.Pinyin -> pinyin != null
@@ -95,24 +127,29 @@ object GlideTyping {
         executor.execute {
             val t = System.currentTimeMillis()
             runCatching {
-                when (mode) {
-                    Mode.Pinyin -> pinyin = loadPinyin(app, false)
-                    Mode.Flypy -> flypyDict = loadPinyin(app, true)
-                    Mode.English -> english = loadEnglish(app)
-                }
+                loadBlocking(mode) { app.assets.open("usr/share/rime-data/$it") }
             }.onFailure { Timber.w(it, "glide dictionary $mode failed to load") }
             Timber.d("glide dictionary $mode loaded in ${System.currentTimeMillis() - t}ms")
             synchronized(loading) { loading.remove(mode) }
         }
     }
 
+    /** load [mode]'s word list synchronously; [open] maps a path inside rime-data to its stream (also used by tests) */
+    internal fun loadBlocking(mode: Mode, open: (String) -> InputStream) {
+        when (mode) {
+            Mode.Pinyin -> pinyin = loadPinyin(open, false)
+            Mode.Flypy -> flypyDict = loadPinyin(open, true)
+            Mode.English -> english = loadEnglish(open)
+        }
+    }
+
     // ---------------------------------------------------------------- dictionaries
 
-    private fun openDict(context: Context, path: String) =
-        BufferedReader(InputStreamReader(context.assets.open("usr/share/rime-data/$path"), Charsets.UTF_8), 1 shl 16)
+    private fun openDict(open: (String) -> InputStream, path: String) =
+        BufferedReader(InputStreamReader(open(path), Charsets.UTF_8), 1 shl 16)
 
-    private inline fun forEachEntry(context: Context, path: String, block: (List<String>) -> Unit) {
-        openDict(context, path).use { r ->
+    private inline fun forEachEntry(noinline open: (String) -> InputStream, path: String, block: (List<String>) -> Unit) {
+        openDict(open, path).use { r ->
             var body = false
             while (true) {
                 val line = r.readLine() ?: break
@@ -168,14 +205,14 @@ object GlideTyping {
         return base
     }
 
-    private fun loadPinyin(context: Context, doublePinyin: Boolean): Dict {
+    private fun loadPinyin(open: (String) -> InputStream, doublePinyin: Boolean): Dict {
         class W(val weight: Long, val word: String, val syllables: List<String>)
         val singles = ArrayList<W>(12000)
         val words = ArrayList<W>(400000)
-        forEachEntry(context, "cn_dicts/8105.dict.yaml") { p ->
+        forEachEntry(open, "cn_dicts/8105.dict.yaml") { p ->
             if (p.size >= 3) singles.add(W(p[2].trim().toLongOrNull() ?: 0L, p[0].trim(), listOf(p[1].trim())))
         }
-        forEachEntry(context, "cn_dicts/base.dict.yaml") { p ->
+        forEachEntry(open, "cn_dicts/base.dict.yaml") { p ->
             if (p.size < 3) return@forEachEntry
             val sy = p[1].split(' ')
             if (sy.size !in 2..4) return@forEachEntry
@@ -241,23 +278,63 @@ object GlideTyping {
             "sorry please really today tomorrow night morning going doing being got nice sure maybe " +
             "translate google keyboard android message phone search friend school family").split(' ')
 
-    private fun loadEnglish(context: Context): Dict {
-        val outputs = LinkedHashMap<String, String>(24000)
-        forEachEntry(context, "en_dicts/en.dict.yaml") { p ->
-            val w = p[0].trim()
-            val code = buildString { for (c in w.lowercase()) if (c in 'a'..'z') append(c) }
-            if (code.length < 2) return@forEachEntry
-            val old = outputs[code]
-            if (old == null || (w == w.lowercase() && old != old.lowercase())) outputs[code] = w
-        }
+    /**
+     * English words: real usage frequencies from en_dicts/ifb_en_freq.tsv (AOSP LatinIME en_US list,
+     * Apache-2.0, staged by ifboard/stage-data.sh), plus rime-ice's en.dict.yaml for coverage.
+     * Falls back to the old small boost list when the frequency file is missing.
+     */
+    private fun loadEnglish(open: (String) -> InputStream): Dict {
+        val outputs = LinkedHashMap<String, String>(64000)
+        val prior = HashMap<String, Float>(64000)
+        val hasFreq = runCatching {
+            BufferedReader(InputStreamReader(open("en_dicts/ifb_en_freq.tsv"), Charsets.UTF_8), 1 shl 16).use { r ->
+                while (true) {
+                    val line = r.readLine() ?: break
+                    if (line.isEmpty() || line[0] == '#') continue
+                    val tab = line.indexOf('\t')
+                    if (tab <= 0) continue
+                    val w = line.substring(0, tab)
+                    val f = line.substring(tab + 1).trim().toIntOrNull() ?: continue
+                    val code = englishCode(w)
+                    if (code.length < 2) continue
+                    // LatinIME frequencies are already on a log scale (0..255)
+                    val pr = 5.5f + 9f * f / 255f
+                    val old = prior[code]
+                    if (old == null || pr > old) {
+                        prior[code] = pr
+                        outputs[code] = w
+                    }
+                }
+            }
+            true
+        }.getOrElse { Timber.w(it, "English frequency list missing, using the boost list"); false }
         val rank = HashMap<String, Int>().apply { common.forEachIndexed { i, w -> putIfAbsent(w, i) } }
+        forEachEntry(open, "en_dicts/en.dict.yaml") { p ->
+            val w = p[0].trim()
+            val code = englishCode(w)
+            if (code.length < 2) return@forEachEntry
+            if (hasFreq) {
+                if (code !in prior) {
+                    outputs[code] = w
+                    prior[code] = 5.0f - 0.10f * code.length
+                }
+            } else {
+                val old = outputs[code]
+                if (old == null || (w == w.lowercase() && old != old.lowercase())) outputs[code] = w
+            }
+        }
         val codes = outputs.keys.toTypedArray()
         val freq = FloatArray(codes.size) {
-            val r = rank[codes[it]]
-            if (r != null) 13f - 3.5f * r / common.size else 8.5f - 0.12f * codes[it].length
+            val c = codes[it]
+            prior[c] ?: run {
+                val r = rank[c]
+                if (r != null) 13f - 3.5f * r / common.size else 8.5f - 0.12f * c.length
+            }
         }
         return buildDict(codes, Array(codes.size) { outputs[codes[it]]!! }, freq)
     }
+
+    private fun englishCode(w: String) = buildString { for (c in w.lowercase()) if (c in 'a'..'z') append(c) }
 
     private fun buildDict(
         codes: Array<String>,
@@ -537,7 +614,8 @@ object GlideTyping {
 
         val dpCur = FloatArray(M)
         val dpNext = FloatArray(M)
-        val coarseLimit = 120
+        val w = this.w
+        val coarseLimit = w.coarseLimit
         val coarseHeap = PriorityQueue<Coarse>(coarseLimit + 1, compareBy { it.coarseScore })
 
         // Pass 1: fast bounding box + length + coarse trace coverage + monotonic alignment
@@ -560,7 +638,7 @@ object GlideTyping {
                     val mono = monotonicMiss(ideal.kpts, L, gs, h, 0.30f, dpCur, dpNext)
                     val avgMono = mono / max(L - 1, 1)
                     val lenRatio = abs(iLen - gLen) / max(gLen, 1.5f)
-                    val score1 = -2.2f * avgMono - 2.4f * traceCoarse * traceCoarse - 1.8f * endPen - 1.8f * lenRatio * lenRatio + 0.30f * dict.freq[id]
+                    val score1 = -2.2f * avgMono - 2.4f * traceCoarse * traceCoarse - 1.8f * endPen - 1.8f * lenRatio * lenRatio + w.coarseFreq * dict.freq[id]
                     if (coarseHeap.size < coarseLimit) {
                         coarseHeap.add(Coarse(id, ideal, endPen, score1))
                     } else if (score1 > coarseHeap.peek()!!.coarseScore) {
@@ -573,7 +651,11 @@ object GlideTyping {
 
         // Pass 2: high-precision Banded DTW + Full trace coverage + Monotonic key alignment
         val fineHeap = PriorityQueue<Result>(limit + 1, compareBy { it.score })
-        val freqW = if (mode == Mode.Flypy) 0.34f else 0.32f
+        val freqW = when (mode) {
+            Mode.Flypy -> w.freqFlypy
+            Mode.Pinyin -> w.freqPinyin
+            Mode.English -> w.freqEnglish
+        }
         for (c in coarseHeap) {
             val ideal = c.ideal
             val L = ideal.keys.size
@@ -610,8 +692,8 @@ object GlideTyping {
                     else -> 0f
                 }
             } else 0f
-            val score = -a * a - b * b - 2.8f * traceErr * traceErr - 3.2f * missAvg -
-                1.65f * c.endPen - 2.4f * lenMis * lenMis - chordDev - repeatPen + freqW * dict.freq[c.id]
+            val score = -w.loc * a * a - w.shp * b * b - w.trace * traceErr * traceErr - w.miss * missAvg -
+                w.end * c.endPen - w.len * lenMis * lenMis - chordDev - repeatPen + freqW * dict.freq[c.id]
 
             if (fineHeap.size < limit) fineHeap.add(Result(rawCode, dict.outputs[c.id], score))
             else if (score > fineHeap.peek()!!.score) {

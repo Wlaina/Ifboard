@@ -198,16 +198,27 @@ class TextKeyboard(
 
     private fun commitGlide(xy: FloatArray, n: Int, geometry: GlideTyping.Geometry, mode: GlideTyping.Mode) {
         FlypyTypoCorrector.clear()
-        val best = GlideTyping.decode(xy, n, geometry, mode).firstOrNull() ?: return
+        GlideAlternates.clear()
+        val results = GlideTyping.decode(xy, n, geometry, mode, limit = 6)
+        val best = results.firstOrNull() ?: return
         when (mode) {
-            GlideTyping.Mode.Pinyin, GlideTyping.Mode.Flypy -> best.code.forEach {
-                // bypass caps handling: Rime always gets lowercase key presses
-                super.onAction(KeyAction.FcitxKeyAction(it.toString()), KeyActionListener.Source.Keyboard)
+            GlideTyping.Mode.Pinyin, GlideTyping.Mode.Flypy -> {
+                // runner-ups are merged into Rime's candidates once it has the best code
+                GlideAlternates.set(best, results)
+                best.code.forEach {
+                    // bypass caps handling: Rime always gets lowercase key presses
+                    super.onAction(KeyAction.FcitxKeyAction(it.toString()), KeyActionListener.Source.Keyboard)
+                }
             }
             GlideTyping.Mode.English -> {
-                val word = applyCapsToEnglishWord(best.output, capsState)
-                if (capsState == CapsState.Once) switchCapsState()
-                super.onAction(KeyAction.GlideWordAction(word), KeyActionListener.Source.Keyboard)
+                val caps = capsState
+                val word = applyCapsToEnglishWord(best.output, caps)
+                val alts = results.asSequence().drop(1)
+                    .map { applyCapsToEnglishWord(it.output, caps) }
+                    .filter { !it.equals(word, ignoreCase = true) }
+                    .distinct().take(3).toList()
+                if (caps == CapsState.Once) switchCapsState()
+                super.onAction(KeyAction.GlideWordAction(word, alts), KeyActionListener.Source.Keyboard)
             }
         }
     }
@@ -225,6 +236,8 @@ class TextKeyboard(
     private fun transformPunctuation(p: String) = punctuationMapping.getOrDefault(p, p)
 
     override fun onAction(action: KeyAction, source: KeyActionListener.Source) {
+        // any key typed after a glide: its runner-up words are no longer relevant
+        GlideAlternates.clear()
         var transformed = action
         when (action) {
             is KeyAction.FcitxKeyAction -> when (source) {

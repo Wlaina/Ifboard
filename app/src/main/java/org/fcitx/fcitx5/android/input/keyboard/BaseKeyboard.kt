@@ -187,7 +187,8 @@ abstract class BaseKeyboard(
         }
         val density = resources.displayMetrics.density
         val landscape =
-            resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+            resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE &&
+                    !prefs.keyboard.floatingKeyboard.getValue()
         val prefs = org.fcitx.fcitx5.android.data.theme.ThemeManager.prefs
         val hMarginPrefDp =
             (if (landscape) prefs.keyHorizontalMarginLandscape else prefs.keyHorizontalMargin).getValue().toFloat()
@@ -469,6 +470,8 @@ abstract class BaseKeyboard(
         private set
     protected var lastTapY = Float.NaN
         private set
+    private val pointerDownX = FloatArray(MAX_POINTERS) { Float.NaN }
+    private val pointerDownY = FloatArray(MAX_POINTERS) { Float.NaN }
 
     protected fun currentGlideGeometry(): GlideTyping.Geometry? = glideGeometry()
     private var trailVisible = false
@@ -604,9 +607,26 @@ abstract class BaseKeyboard(
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
-            lastTapX = ev.x
-            lastTapY = ev.y
+        // 记录每根手指的按下落点；按键在抬起时才触发，双拇指交替快打时
+        // 抬起的往往不是最后按下的那根手指，所以要按 pointerId 取回它自己的落点
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
+                val i = ev.actionIndex
+                val id = ev.getPointerId(i)
+                if (id in 0 until MAX_POINTERS) {
+                    pointerDownX[id] = ev.getX(i)
+                    pointerDownY[id] = ev.getY(i)
+                }
+                lastTapX = ev.getX(i)
+                lastTapY = ev.getY(i)
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> {
+                val id = ev.getPointerId(ev.actionIndex)
+                if (id in 0 until MAX_POINTERS) {
+                    lastTapX = pointerDownX[id]
+                    lastTapY = pointerDownY[id]
+                }
+            }
         }
         val mode = glideMode
         if (mode == null || (glideState != GlideState.Gliding && !glideTyping.getValue())) {
@@ -726,6 +746,7 @@ abstract class BaseKeyboard(
 
     companion object {
         private const val TrailMillis = 320L
+        private const val MAX_POINTERS = 32
     }
 
     private fun findTargetChild(x: Float, y: Float): View? {

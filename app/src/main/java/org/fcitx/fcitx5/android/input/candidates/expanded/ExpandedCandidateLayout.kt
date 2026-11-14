@@ -10,6 +10,7 @@ import android.content.res.Configuration
 import android.view.Gravity
 import androidx.constraintlayout.widget.ConstraintLayout
 import org.fcitx.fcitx5.android.R
+import org.fcitx.fcitx5.android.data.prefs.AppPrefs
 import org.fcitx.fcitx5.android.data.theme.Theme
 import org.fcitx.fcitx5.android.data.theme.ThemeManager
 import org.fcitx.fcitx5.android.input.keyboard.BackspaceKey
@@ -121,7 +122,8 @@ class ExpandedCandidateLayout(context: Context, theme: Theme) : ConstraintLayout
     init {
         id = R.id.expanded_candidate_view
 
-        val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE &&
+                !AppPrefs.getInstance().keyboard.floatingKeyboard.getValue()
         val inset = dp(if (landscape) keyVerticalMarginLandscape else keyVerticalMargin)
         tabsContainer.background =
             singleSideBorderDrawable(dp(1), theme.dividerColor, Gravity.RIGHT, inset)

@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.core.FcitxEvent
 import org.fcitx.fcitx5.android.input.keyboard.FlypyTypoCorrector
+import org.fcitx.fcitx5.android.input.keyboard.GlideAlternates
 import org.fcitx.fcitx5.android.input.keyboard.GboardSpell
 import org.fcitx.fcitx5.android.core.InputMethodEntry
 import org.fcitx.fcitx5.android.core.CandidateWord
@@ -51,14 +52,16 @@ class HorizontalCandidateComponent :
     private val bar: KawaiiBarComponent by manager.must()
 
     private val fillStyle by AppPrefs.getInstance().keyboard.horizontalCandidateStyle
-    private val maxSpanCountPref by lazy {
-        AppPrefs.getInstance().keyboard.run {
-            if (context.resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT)
+    private val maxSpanCountPref
+        get() = AppPrefs.getInstance().keyboard.run {
+            if (context.resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT ||
+                floatingKeyboard.getValue()
+            ) {
                 expandedCandidateGridSpanCount
-            else
+            } else {
                 expandedCandidateGridSpanCountLandscape
+            }
         }
-    }
 
     private var layoutMinWidth = 0
     private var layoutFlexGrow = 1f
@@ -102,11 +105,19 @@ class HorizontalCandidateComponent :
                     if (engineIndex >= 0) {
                         if (flypy) FlypyTypoCorrector.onEngineCandidateSelected(holder.candidate.text)
                         fcitx.launchOnReady { it.select(engineIndex) }
+                    } else if (engineIndex == -3) {
+                        // 滑行输入的备选词：直接上屏并清空当前 Rime 输入
+                        val word = holder.candidate.text
+                        GlideAlternates.clear()
+                        primaryCorrectionWord = null
+                        FlypyTypoCorrector.clear()
+                        service.commitText(word)
+                        fcitx.launchOnReady { it.reset() }
                     } else if (engineIndex == -2) {
                         // 小鹤双拼邻键容错纠错词条：直接上屏中文词（不追加空格）并重置引擎
                         val word = holder.candidate.text
                         primaryCorrectionWord = null
-                        FlypyTypoCorrector.clear()
+                        FlypyTypoCorrector.onCorrectionSelected(correctionCodes[word].orEmpty())
                         service.commitText(word)
                         fcitx.launchOnReady { it.reset() }
                     } else {
@@ -193,6 +204,8 @@ class HorizontalCandidateComponent :
     private var english = false
     private var flypy = false
     private var primaryCorrectionWord: String? = null
+    // 纠错词条 -> 纠正后的小鹤编码（用于触摸习惯学习）
+    private var correctionCodes: Map<String, String> = emptyMap()
     private val spell by lazy { GboardSpell(context) }
     // maps displayed position -> engine candidate index (-1 for injected corrections, -2 for Flypy typos)
     private var engineIdx: IntArray = IntArray(0)
@@ -201,7 +214,7 @@ class HorizontalCandidateComponent :
     fun commitPrimaryCorrection(): Boolean {
         val word = primaryCorrectionWord ?: return false
         primaryCorrectionWord = null
-        FlypyTypoCorrector.clear()
+        FlypyTypoCorrector.onCorrectionSelected(correctionCodes[word].orEmpty())
         service.commitText(word)
         fcitx.launchOnReady { it.reset() }
         return true
@@ -228,19 +241,45 @@ class HorizontalCandidateComponent :
     }
 
     override fun onPreeditEmptyStateUpdate(empty: Boolean) {
+        GlideAlternates.composing = !empty
         if (empty) {
+            GlideAlternates.clear()
             primaryCorrectionWord = null
             FlypyTypoCorrector.clear()
         }
     }
 
     override fun onCandidateUpdate(data: FcitxEvent.CandidateListEvent.Data) {
+        val alts = GlideAlternates.current
+        if (alts.isNotEmpty() && data.candidates.isNotEmpty()) {
+            // 滑行输入：Rime 首选之后插入解码器的其他候选词（Gboard 式一键改选）
+            lastEngineData = data
+            primaryCorrectionWord = null
+            val first = data.candidates[0]
+            val merged = ArrayList<CandidateWord>(data.candidates.size + alts.size)
+            val idx = ArrayList<Int>(data.candidates.size + alts.size)
+            merged.add(first); idx.add(0)
+            val altWords = HashSet<String>()
+            alts.forEach {
+                if (it.word != first.text && altWords.add(it.word)) {
+                    merged.add(CandidateWord("", it.word, "")); idx.add(-3)
+                }
+            }
+            for (i in 1 until data.candidates.size) {
+                val c = data.candidates[i]
+                if (c.text !in altWords) { merged.add(c); idx.add(i) }
+            }
+            engineIdx = idx.toIntArray()
+            show(merged.toTypedArray(), if (data.total < 0) -1 else data.total + altWords.size)
+            return
+        }
         lastEngineData = data
         primaryCorrectionWord = null
         engineIdx = IntArray(data.candidates.size) { it }
         if (flypy) {
             val sugs = FlypyTypoCorrector.suggest(data.candidates)
             if (sugs.isNotEmpty()) {
+                correctionCodes = sugs.associate { it.word to it.code }
                 val sugWords = sugs.map { it.word }.toSet()
                 val promote = sugs[0].promotePrimary
                 val merged = ArrayList<CandidateWord>(data.candidates.size + sugs.size)

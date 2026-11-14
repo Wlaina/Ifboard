@@ -31,6 +31,8 @@ rm -f $R/*.gram
 if [ ! -f "$RIME_ICE_DIR/rime_ice.schema.yaml" ]; then
   cp ifboard/data/rime_ice.schema.yaml $R/ || { echo "rime_ice.schema.yaml not found" >&2; exit 1; }
 fi
+# English word frequencies for glide typing (AOSP LatinIME en_US list, Apache-2.0, see ifboard/data/NOTICE.LatinIME)
+cp ifboard/data/ifb_en_freq.tsv $R/en_dicts/
 # 3. first-run import
 U=$A/ifboard
 rm -rf $U; mkdir -p $U/rime/sync $U/config/conf

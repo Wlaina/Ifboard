@@ -99,8 +99,10 @@ class CommonKeyActionListener :
                     action.sym.sym == FcitxKeyMapping.FcitxKey_space &&
                         horizontalCandidate.commitPrimaryCorrection() -> Unit
                     else -> {
-                        if (action.sym.sym == FcitxKeyMapping.FcitxKey_BackSpace) {
-                            FlypyTypoCorrector.popLast()
+                        when (action.sym.sym) {
+                            FcitxKeyMapping.FcitxKey_BackSpace -> FlypyTypoCorrector.popLast()
+                            // 空格上屏 Rime 首选：按原样按键学习触摸习惯
+                            FcitxKeyMapping.FcitxKey_space -> FlypyTypoCorrector.onLiteralCommitted()
                         }
                         service.postFcitxJob {
                             sendKey(action.sym, action.states)

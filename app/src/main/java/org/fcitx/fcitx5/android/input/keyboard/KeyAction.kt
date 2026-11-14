@@ -21,8 +21,9 @@ sealed class KeyAction {
 
     data class CommitAction(val text: String) : KeyAction()
 
-    // a word produced by glide typing on the English keyboard (space is added when needed)
-    data class GlideWordAction(val word: String) : KeyAction()
+    // a word produced by glide typing on the English keyboard (space is added when needed);
+    // [alternates] are the runner-up words, offered in the bar to replace it with one tap
+    data class GlideWordAction(val word: String, val alternates: List<String> = emptyList()) : KeyAction()
 
     data class GlidePreviewAction(val code: String, val candidates: List<String>) : KeyAction()
 
