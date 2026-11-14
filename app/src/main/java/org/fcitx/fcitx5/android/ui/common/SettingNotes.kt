@@ -32,7 +32,7 @@ object SettingNotes {
         "keyboard_long_press_delay" to "按住多久算长按（弹出更多字符）。越小越快，太小容易误触",
         "space_long_press_behavior" to "长按空格键要做什么，例如弹出输入法选择",
         "space_swipe_move_cursor" to "在空格键上左右划动来移动光标",
-        "glide_typing" to "划过字母连词输入（支持小鹤双拼与英文）",
+        "glide_typing" to "划过字母连词输入（支持全拼、小鹤双拼与英文）",
         "glide_typing_trail" to "滑行时显示渐隐轨迹线",
         "gb_auto_correct" to "仅英文：按空格时用系统拼写检查自动改正拼错的单词，紧接着按退格可以撤销",
         "gb_auto_capitalize" to "仅英文：在句首自动切换为大写",

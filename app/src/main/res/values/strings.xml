@@ -265,6 +265,17 @@
     <string name="space_swipe_move_cursor">Swipe on space key to move cursor</string>
     <string name="glide_typing">Glide typing</string>
     <string name="glide_typing_trail">Show glide trail</string>
+    <string name="touch_model_title">Touch habit (typo correction)</string>
+    <string name="touch_model_summary_empty">Nothing learned yet. While you type Pinyin (full or Xiaohe Shuangpin), typo correction learns where you actually hit each key, on this device only.</string>
+    <string name="touch_model_summary">Learned from %1$d inputs · average offset %2$d%% of a key</string>
+    <string name="touch_model_detail_header">Keys you hit most off-center (share of key width / height):</string>
+    <string name="touch_model_centered">Your taps are close to the key centers, nothing to compensate yet.</string>
+    <string name="touch_model_right">right %1$d%%</string>
+    <string name="touch_model_left">left %1$d%%</string>
+    <string name="touch_model_up">up %1$d%%</string>
+    <string name="touch_model_down">down %1$d%%</string>
+    <string name="touch_model_reset">Reset</string>
+    <string name="touch_model_reset_done">Touch habit cleared</string>
     <string name="please_wait">Please wait…</string>
     <string name="rotate">Rotate</string>
     <string name="flip">Flip</string>

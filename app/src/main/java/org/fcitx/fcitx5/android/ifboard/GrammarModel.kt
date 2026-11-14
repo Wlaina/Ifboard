@@ -3,6 +3,10 @@
  * Ifboard: the wanxiang grammar model (~400 MB) is no longer bundled in the APK.
  * It is downloaded on demand from the official release
  *   https://github.com/amzxyz/rime-wanxiang-data/releases/tag/LTS
+ * and, when GitHub can't be reached (common in mainland China), from the author's own mirror on CNB,
+ * the same one wanxiang's official update tool uses:
+ *   https://cnb.cool/amzxyz/rime-wanxiang/-/releases/tag/model
+ * Both publish a sha256 for the file, which is verified after the download either way.
  * into the Rime user dir (files/data/rime), which librime-octagram searches before the shared dir.
  * That dir survives APK upgrades, so the model is downloaded only once (or when it is updated upstream).
  *
@@ -35,6 +39,10 @@ object GrammarModel {
 
     const val FILE = "wanxiang-lts-zh-hans.gram"
     private const val API = "https://api.github.com/repos/amzxyz/rime-wanxiang-data/releases/tags/LTS"
+    private const val CNB_WEB = "https://cnb.cool"
+    private const val CNB_API = "$CNB_WEB/amzxyz/rime-wanxiang/-/releases/tags/model"
+    const val SOURCE_GITHUB = "GitHub"
+    const val SOURCE_CNB = "CNB 国内镜像"
     private const val MAGIC = "Rime::Grammar/"
 
     // SharedPreferences keys
@@ -42,7 +50,13 @@ object GrammarModel {
     private const val PREF_DIGEST = "ifb_gram_digest"
     private const val PREF_UPDATED = "ifb_gram_updated"
 
-    data class Remote(val url: String, val size: Long, val sha256: String?, val updated: String)
+    data class Remote(
+        val url: String,
+        val size: Long,
+        val sha256: String?,
+        val updated: String,
+        val source: String = SOURCE_GITHUB
+    )
 
     sealed class State {
         data object Idle : State()
@@ -76,7 +90,24 @@ object GrammarModel {
 
     val busy get() = job?.isActive == true
 
+    /** GitHub first; if it can't be reached, the CNB mirror */
     suspend fun fetchRemote(): Remote = withContext(Dispatchers.IO) {
+        try {
+            fetchGithub()
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            Timber.w(e, "GitHub release unavailable, trying the CNB mirror")
+            try {
+                fetchCnb()
+            } catch (e2: Exception) {
+                if (e2 is kotlinx.coroutines.CancellationException) throw e2
+                Timber.w(e2, "CNB mirror unavailable")
+                error("GitHub 与国内镜像都无法访问（${e.message}；${e2.message}）")
+            }
+        }
+    }
+
+    private fun fetchGithub(): Remote {
         val req = Request.Builder()
             .url(API)
             .header("User-Agent", "Ifboard-Android/${BuildConfig.VERSION_NAME}")
@@ -89,7 +120,7 @@ object GrammarModel {
             for (i in 0 until assets.length()) {
                 val a = assets.getJSONObject(i)
                 if (a.getString("name") == FILE) {
-                    return@withContext Remote(
+                    return Remote(
                         url = a.getString("browser_download_url"),
                         size = a.getLong("size"),
                         sha256 = a.optString("digest").takeIf { it.startsWith("sha256:") }?.removePrefix("sha256:"),
@@ -98,6 +129,33 @@ object GrammarModel {
                 }
             }
             error("官方发布页里没有找到 $FILE")
+        }
+    }
+
+    /** the CNB web API returns JSON for this Accept header; no token needed for public releases */
+    private fun fetchCnb(): Remote {
+        val req = Request.Builder()
+            .url(CNB_API)
+            .header("User-Agent", "Ifboard-Android/${BuildConfig.VERSION_NAME}")
+            .header("Accept", "application/vnd.cnb.web+json")
+            .build()
+        IfboardSync.executeFriendly(http, req).use { resp ->
+            if (!resp.isSuccessful) error("无法访问国内镜像（${resp.code}）")
+            val assets = JSONObject(resp.body!!.string()).getJSONObject("release").getJSONArray("assets")
+            for (i in 0 until assets.length()) {
+                val a = assets.getJSONObject(i)
+                if (a.getString("name") == FILE) {
+                    return Remote(
+                        url = CNB_WEB + a.getString("path"),
+                        size = a.getLong("size_in_byte"),
+                        sha256 = a.optString("hash_value")
+                            .takeIf { a.optString("hash_algo") == "sha256" && it.length == 64 },
+                        updated = a.optString("updated_at"),
+                        source = SOURCE_CNB
+                    )
+                }
+            }
+            error("国内镜像里没有找到 $FILE")
         }
     }
 
@@ -142,6 +200,20 @@ object GrammarModel {
     private suspend fun download(ctx: Context) = withContext(Dispatchers.IO) {
         _state.value = State.Checking
         val r = fetchRemote()
+        try {
+            transfer(ctx, r)
+        } catch (e: Exception) {
+            // GitHub answered the API call but its download host is unreachable or the 400 MB transfer
+            // broke off (network errors arrive wrapped by executeFriendly): continue from the mirror
+            if (e is kotlinx.coroutines.CancellationException || r.source != SOURCE_GITHUB) throw e
+            Timber.w(e, "GitHub download failed, switching to the CNB mirror")
+            _state.value = State.Checking
+            val mirror = runCatching { fetchCnb() }.getOrElse { throw e }
+            transfer(ctx, mirror)
+        }
+    }
+
+    private suspend fun transfer(ctx: Context, r: Remote) = withContext(Dispatchers.IO) {
         val dir = dir(ctx).apply { mkdirs() }
         val part = part(ctx)
         val pp = prefs(ctx)

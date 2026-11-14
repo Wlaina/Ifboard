@@ -197,7 +197,7 @@ class TextKeyboard(
     }
 
     private fun commitGlide(xy: FloatArray, n: Int, geometry: GlideTyping.Geometry, mode: GlideTyping.Mode) {
-        FlypyTypoCorrector.clear()
+        TypoCorrector.clear()
         GlideAlternates.clear()
         val results = GlideTyping.decode(xy, n, geometry, mode, limit = 6)
         val best = results.firstOrNull() ?: return
@@ -225,8 +225,8 @@ class TextKeyboard(
 
     private fun prepareGlide() {
         val mode = glideMode
-        if (mode == GlideTyping.Mode.Flypy) {
-            FlypyTypoCorrector.prepare(context)
+        if (mode == GlideTyping.Mode.Flypy || mode == GlideTyping.Mode.Pinyin) {
+            TypoCorrector.prepare(context, mode)
         }
         if (!AppPrefs.getInstance().keyboard.glideTyping.getValue()) return
         mode?.let { GlideTyping.prepare(context, it) }
@@ -270,19 +270,22 @@ class TextKeyboard(
             is KeyAction.CapsAction -> switchCapsState(action.lock)
             else -> {}
         }
-        if (glideMode == GlideTyping.Mode.Flypy && transformed is KeyAction.FcitxKeyAction) {
+        val typoMode = glideMode
+        if ((typoMode == GlideTyping.Mode.Flypy || typoMode == GlideTyping.Mode.Pinyin) &&
+            transformed is KeyAction.FcitxKeyAction
+        ) {
             if (source == KeyActionListener.Source.Keyboard &&
                 transformed.act.length == 1 &&
                 transformed.act[0] in 'a'..'z'
             ) {
-                FlypyTypoCorrector.recordTap(
+                TypoCorrector.recordTap(
                     transformed.act[0],
                     lastTapX,
                     lastTapY,
                     currentGlideGeometry()
                 )
             } else {
-                FlypyTypoCorrector.clear()
+                TypoCorrector.clear()
             }
         }
         super.onAction(transformed, source)
@@ -307,7 +310,7 @@ class TextKeyboard(
     override fun onInputMethodUpdate(ime: InputMethodEntry) {
         imeName = ime.uniqueName
         imeSubMode = ime.subMode.run { "$name $label" }
-        FlypyTypoCorrector.clear()
+        TypoCorrector.clear()
         prepareGlide()
         // Gboard style space bar label, plus a small signature so it is not mistaken for Gboard:
         // "雾凇拼音" and a tiny terracotta dot (same accent as the PC Weasel theme)

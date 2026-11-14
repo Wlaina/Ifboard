@@ -45,11 +45,11 @@ class TapCorrectionBenchmarkTest {
     }
 
     private val current = object : Impl {
-        override fun clear() = FlypyTypoCorrector.clear()
+        override fun clear() = TypoCorrector.clear()
         override fun tap(ch: Char, x: Float, y: Float, g: GlideTyping.Geometry) =
-            FlypyTypoCorrector.recordTap(ch, x, y, g)
+            TypoCorrector.recordTap(ch, x, y, g)
         override fun suggest(c: Array<CandidateWord>) =
-            FlypyTypoCorrector.suggest(c).map { it.code to it.promotePrimary }
+            TypoCorrector.suggest(c).map { it.code to it.promotePrimary }
     }
 
     private fun bench(impl: Impl, label: String, noise: Float, codes: List<String>, quiet: Boolean = false): FloatArray {
@@ -102,7 +102,8 @@ class TapCorrectionBenchmarkTest {
         if (!GlideTyping.isReady(GlideTyping.Mode.Flypy)) {
             GlideTyping.loadBlocking(GlideTyping.Mode.Flypy) { File(dataDir, it).inputStream() }
         }
-        FlypyTypoCorrector.resetOffsets()
+        TypoCorrector.setModeForTest(GlideTyping.Mode.Flypy)
+        TypoCorrector.resetOffsets()
         val d = GlideTyping.flypyDict!!
         val ids = d.freq.indices.sortedByDescending { d.freq[it] }
             .filter { d.codes[it].length in 4..8 }
@@ -120,14 +121,82 @@ class TapCorrectionBenchmarkTest {
         }
         if (System.getenv("IFB_SWEEP") != null) {
             for (ins in floatArrayOf(-1.5f, -0.5f, 0.5f)) for (pd in floatArrayOf(1.5f, 2.5f, 3.5f)) for (pr in floatArrayOf(2f, 3f, 4.5f)) {
-                FlypyTypoCorrector.INSERT_MIN_RATIO = ins
-                FlypyTypoCorrector.PROMOTE_MAX_DROP = pd
-                FlypyTypoCorrector.PROMOTE_MIN_RATIO = pr
+                TypoCorrector.INSERT_MIN_RATIO = ins
+                TypoCorrector.PROMOTE_MAX_DROP = pd
+                TypoCorrector.PROMOTE_MIN_RATIO = pr
                 val w = bench(current, "", 0.26f, ids, quiet = true)
                 val s2 = bench(current, "", 0.26f, sentences, quiet = true)
                 println("[sweep] ins=$ins pd=$pd pr=$pr words fixed@1=${"%.3f".format(w[0])} shown=${"%.3f".format(w[1])} " +
                     "fpIns=${"%.3f".format(w[3])} | sent fixed@1=${"%.3f".format(s2[0])} fpPromote=${"%.3f".format(s2[2])} fpIns=${"%.3f".format(s2[3])}")
             }
         }
+    }
+
+    /**
+     * 全拼: what Rime would show first is the word for the literal code, a composed sentence when the
+     * letters split into pinyin syllables, or nothing complete. No old implementation to compare with:
+     * without a corrector nothing is ever fixed, so fixed@1 / shown are the gain and falseX the cost.
+     */
+    @Test
+    fun tap_correction_benchmark_pinyin() {
+        assumeTrue(System.getenv("IFB_BENCH") != null && File(dataDir, "cn_dicts/base.dict.yaml").exists())
+        if (!GlideTyping.isReady(GlideTyping.Mode.Pinyin)) {
+            GlideTyping.loadBlocking(GlideTyping.Mode.Pinyin) { File(dataDir, it).inputStream() }
+        }
+        TypoCorrector.setModeForTest(GlideTyping.Mode.Pinyin)
+        TypoCorrector.resetOffsets()
+        val d = GlideTyping.dictFor(GlideTyping.Mode.Pinyin)!!
+        val codeToIdx = d.codeToIdx!!
+        val g = KeyboardGeometryForTest.qwerty()
+        val words = d.freq.indices.sortedByDescending { d.freq[it] }
+            .filter { d.codes[it].length in 4..12 && TypoCorrector.pinyinSyllableCount(d.codes[it]) >= 2 }
+            .take(4000).shuffled(Random(3)).take(600).map { d.codes[it] }
+        val singles = d.freq.indices.filter { TypoCorrector.pinyinSyllableCount(d.codes[it]) == 1 }
+            .sortedByDescending { d.freq[it] }.take(300)
+        val sr = Random(9)
+        val sentences = (0 until 600).map { d.codes[singles[sr.nextInt(300)]] + d.codes[singles[sr.nextInt(300)]] }
+            .filter { codeToIdx[it] == null }
+        for (noise in floatArrayOf(0.20f, 0.26f, 0.32f)) {
+            for ((label, codes) in listOf("words" to words, "sentences" to sentences)) {
+                val rnd = Random(5)
+                var err = 0; var fixedFirst = 0; var shown = 0
+                var clean = 0; var fpPromote = 0; var fpInsert = 0
+                var t = 0L
+                for (code in codes) {
+                    TypoCorrector.clear()
+                    val sb = StringBuilder()
+                    for (ch in code) {
+                        val (x, y) = KeyboardGeometryForTest.synthTap(ch, g, rnd, noise)
+                        val typed = nearestKey(x, y, g)
+                        sb.append(typed)
+                        TypoCorrector.recordTap(typed, x, y, g)
+                    }
+                    val literal = sb.toString()
+                    val syl = TypoCorrector.pinyinSyllableCount(literal)
+                    val rime = when {
+                        codeToIdx[literal] != null -> arrayOf(CandidateWord("", d.outputs[codeToIdx[literal]!!], ""))
+                        syl > 0 -> arrayOf(CandidateWord("", "啊".repeat(syl), ""))
+                        else -> emptyArray()
+                    }
+                    val t0 = System.nanoTime()
+                    val sugs = TypoCorrector.suggest(rime)
+                    t += System.nanoTime() - t0
+                    if (literal != code) {
+                        err++
+                        if (sugs.firstOrNull()?.let { it.code == code && it.promotePrimary } == true) fixedFirst++
+                        if (sugs.any { it.code == code }) shown++
+                    } else {
+                        clean++
+                        if (sugs.any { it.promotePrimary }) fpPromote++
+                        if (sugs.isNotEmpty()) fpInsert++
+                    }
+                }
+                println("[pinyin] $label noise=$noise mistyped=$err fixed@1=${"%.3f".format(fixedFirst.toFloat() / err)} " +
+                    "shown=${"%.3f".format(shown.toFloat() / err)} | clean=$clean " +
+                    "falsePromote=${"%.3f".format(fpPromote.toFloat() / clean)} " +
+                    "falseInsert=${"%.3f".format(fpInsert.toFloat() / clean)} avg=${"%.2f".format(t / 1e6 / codes.size)}ms")
+            }
+        }
+        TypoCorrector.setModeForTest(GlideTyping.Mode.Flypy)
     }
 }

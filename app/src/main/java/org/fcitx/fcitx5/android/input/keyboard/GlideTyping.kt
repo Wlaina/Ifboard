@@ -58,7 +58,9 @@ object GlideTyping {
         val freq: FloatArray,
         val index: HashMap<Int, IntArray>,
         val codeToIdx: HashMap<String, Int>? = null,
-        val validSyllables: HashSet<String>? = null
+        val validSyllables: HashSet<String>? = null,
+        /** all codes sorted, for "is this a prefix of some word" lookups (全拼 typo correction) */
+        val sortedCodes: Array<String>? = null
     )
 
     /** scoring weights of the fine pass; tuned offline with GlideBenchmarkTest */
@@ -202,8 +204,12 @@ object GlideTyping {
         if (weight > 500_000L) {
             base += 0.42f * ln(1f + (weight - 500_000L).toFloat() / 120f)
         }
-        return base
+        return min(base, priorCap)
     }
+
+    /** upper bound of a word prior: the boost above lets a few very common words reach 19+, far past everything else */
+    @Volatile
+    internal var priorCap = 14.5f
 
     private fun loadPinyin(open: (String) -> InputStream, doublePinyin: Boolean): Dict {
         class W(val weight: Long, val word: String, val syllables: List<String>)
@@ -223,7 +229,8 @@ object GlideTyping {
 
         val bestPrior = HashMap<String, Float>(80000)
         val bestWord = HashMap<String, String>(80000)
-        val syllables = if (doublePinyin) HashSet<String>(512) else null
+        // 小鹤 key pairs, or full pinyin syllables (both used by tap typo correction)
+        val syllables = HashSet<String>(512)
 
         fun add(list: List<W>, limit: Int, isSingle: Boolean) {
             val maxN = min(limit, list.size)
@@ -236,7 +243,7 @@ object GlideTyping {
                     for (s in w.syllables) {
                         val fp = flypy(s)
                         if (fp == null) { ok = false; break }
-                        syllables?.add(fp)
+                        syllables.add(fp)
                         sb.append(fp)
                     }
                     if (!ok || sb.length != w.syllables.size * 2) continue
@@ -244,6 +251,7 @@ object GlideTyping {
                 } else {
                     val c = w.syllables.joinToString("")
                     if (c.length !in 2..18 || c.any { it !in 'a'..'z' }) continue
+                    w.syllables.forEach { syllables.add(it) }
                     c
                 }
                 val prev = bestPrior[code]
@@ -259,10 +267,9 @@ object GlideTyping {
         val codes = bestPrior.keys.toTypedArray()
         val outputs = Array(codes.size) { bestWord[codes[it]] ?: codes[it] }
         val freq = FloatArray(codes.size) { bestPrior[codes[it]]!! }
-        val codeToIdx = if (doublePinyin) {
-            HashMap<String, Int>(codes.size * 2).apply { codes.forEachIndexed { i, c -> put(c, i) } }
-        } else null
-        return buildDict(codes, outputs, freq, codeToIdx, syllables)
+        val codeToIdx = HashMap<String, Int>(codes.size * 2).apply { codes.forEachIndexed { i, c -> put(c, i) } }
+        val sorted = if (doublePinyin) null else codes.sortedArray()
+        return buildDict(codes, outputs, freq, codeToIdx, syllables, sorted)
     }
 
     private val common = ("the of and to a in is it you that he was for on are with as i his they be at one have " +
@@ -341,7 +348,8 @@ object GlideTyping {
         outputs: Array<String>,
         freq: FloatArray,
         codeToIdx: HashMap<String, Int>? = null,
-        validSyllables: HashSet<String>? = null
+        validSyllables: HashSet<String>? = null,
+        sortedCodes: Array<String>? = null
     ): Dict {
         val buckets = HashMap<Int, ArrayList<Int>>()
         codes.forEachIndexed { i, c ->
@@ -349,7 +357,7 @@ object GlideTyping {
         }
         val index = HashMap<Int, IntArray>(buckets.size)
         buckets.forEach { (k, v) -> index[k] = v.toIntArray() }
-        return Dict(codes, outputs, freq, index, codeToIdx, validSyllables)
+        return Dict(codes, outputs, freq, index, codeToIdx, validSyllables, sortedCodes)
     }
 
     private fun bucket(a: Char, b: Char) = (a - 'a') * 26 + (b - 'a')

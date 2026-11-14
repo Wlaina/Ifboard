@@ -265,6 +265,17 @@
     <string name="space_swipe_move_cursor">划动空格键以移动光标</string>
     <string name="glide_typing">滑行输入</string>
     <string name="glide_typing_trail">显示滑行轨迹</string>
+    <string name="touch_model_title">触摸习惯（邻键纠错）</string>
+    <string name="touch_model_summary_empty">还没有学到。用拼音（全拼或小鹤双拼）打字时，邻键纠错会学习你在每个键上的实际落点，只保存在本机。</string>
+    <string name="touch_model_summary">已学习 %1$d 次输入 · 平均偏移 %2$d%% 键宽</string>
+    <string name="touch_model_detail_header">落点偏离中心最多的键（占键宽 / 键高的比例）：</string>
+    <string name="touch_model_centered">你的落点基本在键中心，暂时没有需要补偿的偏移。</string>
+    <string name="touch_model_right">偏右 %1$d%%</string>
+    <string name="touch_model_left">偏左 %1$d%%</string>
+    <string name="touch_model_up">偏上 %1$d%%</string>
+    <string name="touch_model_down">偏下 %1$d%%</string>
+    <string name="touch_model_reset">重置</string>
+    <string name="touch_model_reset_done">已清空触摸习惯</string>
     <string name="please_wait">请稍候…</string>
     <string name="rotate">旋转</string>
     <string name="flip">翻转</string>

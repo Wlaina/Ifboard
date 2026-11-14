@@ -16,7 +16,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.core.FcitxEvent
-import org.fcitx.fcitx5.android.input.keyboard.FlypyTypoCorrector
+import org.fcitx.fcitx5.android.input.keyboard.TypoCorrector
 import org.fcitx.fcitx5.android.input.keyboard.GlideAlternates
 import org.fcitx.fcitx5.android.input.keyboard.GboardSpell
 import org.fcitx.fcitx5.android.core.InputMethodEntry
@@ -103,21 +103,21 @@ class HorizontalCandidateComponent :
                 holder.itemView.setOnClickListener {
                     val engineIndex = engineIdx.getOrElse(holder.idx) { holder.idx }
                     if (engineIndex >= 0) {
-                        if (flypy) FlypyTypoCorrector.onEngineCandidateSelected(holder.candidate.text)
+                        if (typoCorrection) TypoCorrector.onEngineCandidateSelected(holder.candidate.text)
                         fcitx.launchOnReady { it.select(engineIndex) }
                     } else if (engineIndex == -3) {
                         // 滑行输入的备选词：直接上屏并清空当前 Rime 输入
                         val word = holder.candidate.text
                         GlideAlternates.clear()
                         primaryCorrectionWord = null
-                        FlypyTypoCorrector.clear()
+                        TypoCorrector.clear()
                         service.commitText(word)
                         fcitx.launchOnReady { it.reset() }
                     } else if (engineIndex == -2) {
                         // 小鹤双拼邻键容错纠错词条：直接上屏中文词（不追加空格）并重置引擎
                         val word = holder.candidate.text
                         primaryCorrectionWord = null
-                        FlypyTypoCorrector.onCorrectionSelected(correctionCodes[word].orEmpty())
+                        TypoCorrector.onCorrectionSelected(correctionCodes[word].orEmpty())
                         service.commitText(word)
                         fcitx.launchOnReady { it.reset() }
                     } else {
@@ -202,7 +202,7 @@ class HorizontalCandidateComponent :
 
     private val service by manager.inputMethodService()
     private var english = false
-    private var flypy = false
+    private var typoCorrection = false
     private var primaryCorrectionWord: String? = null
     // 纠错词条 -> 纠正后的小鹤编码（用于触摸习惯学习）
     private var correctionCodes: Map<String, String> = emptyMap()
@@ -214,7 +214,7 @@ class HorizontalCandidateComponent :
     fun commitPrimaryCorrection(): Boolean {
         val word = primaryCorrectionWord ?: return false
         primaryCorrectionWord = null
-        FlypyTypoCorrector.onCorrectionSelected(correctionCodes[word].orEmpty())
+        TypoCorrector.onCorrectionSelected(correctionCodes[word].orEmpty())
         service.commitText(word)
         fcitx.launchOnReady { it.reset() }
         return true
@@ -222,20 +222,21 @@ class HorizontalCandidateComponent :
 
     override fun onImeUpdate(ime: InputMethodEntry) {
         english = ime.uniqueName.startsWith("keyboard-")
-        flypy = ime.uniqueName == "rime" && ime.subMode.run {
-            name.contains("小鹤") || label.contains("小鹤") ||
-                name.contains("flypy", ignoreCase = true) || label.contains("flypy", ignoreCase = true)
+        // 邻键纠错覆盖 Rime 的小鹤双拼与全拼（其他双拼方案没有对应词典），与 TextKeyboard.glideMode 的判定一致
+        typoCorrection = ime.uniqueName == "rime" && ime.subMode.run {
+            val s = "$name $label"
+            s.contains("小鹤") || s.contains("flypy", ignoreCase = true) || !s.contains("双拼")
         }
         primaryCorrectionWord = null
-        if (!flypy) FlypyTypoCorrector.clear()
+        if (!typoCorrection) TypoCorrector.clear()
         if (!english) spell.close()
     }
 
     override fun onInputPanelUpdate(data: FcitxEvent.InputPanelEvent.Data) {
-        if (flypy) {
+        if (typoCorrection) {
             val clientEmpty = fcitx.runImmediately { clientPreeditCached.isEmpty() }
             if (data.preedit.isEmpty() && data.auxUp.isEmpty() && clientEmpty) {
-                FlypyTypoCorrector.clear()
+                TypoCorrector.clear()
             }
         }
     }
@@ -245,7 +246,7 @@ class HorizontalCandidateComponent :
         if (empty) {
             GlideAlternates.clear()
             primaryCorrectionWord = null
-            FlypyTypoCorrector.clear()
+            TypoCorrector.clear()
         }
     }
 
@@ -276,8 +277,8 @@ class HorizontalCandidateComponent :
         lastEngineData = data
         primaryCorrectionWord = null
         engineIdx = IntArray(data.candidates.size) { it }
-        if (flypy) {
-            val sugs = FlypyTypoCorrector.suggest(data.candidates)
+        if (typoCorrection) {
+            val sugs = TypoCorrector.suggest(data.candidates)
             if (sugs.isNotEmpty()) {
                 correctionCodes = sugs.associate { it.word to it.code }
                 val sugWords = sugs.map { it.word }.toSet()

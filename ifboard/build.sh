@@ -8,7 +8,7 @@ export BUILD_ABI=arm64-v8a ANDROID_HOME="${ANDROID_HOME:-D:\Android\sdk}" ANDROI
 export ECM_DIR="${ECM_DIR:-D:/Android/tools/ecm/share/ECM/cmake}"
 export PATH="/d/Android/tools/gettext/bin:$PATH"
 unset _JAVA_OPTIONS JAVA_TOOL_OPTIONS
-export BUILD_VERSION_NAME="${IFB_VERSION:-1.2.5}"
+export BUILD_VERSION_NAME="${IFB_VERSION:-1.2.6}"
 ./gradlew --no-daemon --console=plain :plugin:rime:assembleRelease
 bash ifboard/stage-data.sh
 ./gradlew --no-daemon --console=plain :app:assembleRelease "$@"

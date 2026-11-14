@@ -163,6 +163,84 @@ class GlideBenchmarkTest {
         GlideTyping.w.freqEnglish = saved
     }
 
+    /** fixed code lists per mode, so every configuration is scored on exactly the same words */
+    private fun chineseCodes(seedIds: Long, count: Int) = listOf(GlideTyping.Mode.Flypy, GlideTyping.Mode.Pinyin)
+        .associateWith { mode -> sample(mode, 4000, count, seedIds).map { GlideTyping.dictFor(mode)!!.codes[it] } }
+
+    private fun chineseTop1(codes: Map<GlideTyping.Mode, List<String>>, seedNoise: Long): Pair<Float, Float> {
+        val g = KeyboardGeometryForTest.qwerty()
+        val r = FloatArray(2)
+        listOf(GlideTyping.Mode.Flypy, GlideTyping.Mode.Pinyin).forEachIndexed { mi, mode ->
+            val rnd = Random(seedNoise)
+            var ok = 0; var tot = 0
+            for (code in codes[mode]!!) {
+                val noise = 0.15f + 0.20f * rnd.nextFloat()
+                val xy = KeyboardGeometryForTest.synthGlide(code, g, rnd, noise) ?: continue
+                tot++
+                if (GlideTyping.decode(xy, xy.size / 2, g, mode, limit = 1).firstOrNull()?.code == code) ok++
+            }
+            r[mi] = ok.toFloat() / tot
+        }
+        return r[0] to r[1]
+    }
+
+    private fun reloadChinese() {
+        for (mode in listOf(GlideTyping.Mode.Flypy, GlideTyping.Mode.Pinyin)) {
+            GlideTyping.loadBlocking(mode) { File(dataDir, it).inputStream() }
+        }
+    }
+
+    @Test
+    fun prior_cap_sweep() {
+        assumeTrue(ready() && System.getenv("IFB_TUNE") != null)
+        GlideTyping.priorCap = Float.MAX_VALUE
+        reloadChinese()
+        val tuneSet = chineseCodes(21, 600)
+        val heldSet = chineseCodes(99, 600)
+        for (cap in floatArrayOf(Float.MAX_VALUE, 17f, 16f, 15f, 14.5f, 14f)) {
+            GlideTyping.priorCap = cap
+            reloadChinese()
+            println("[cap] cap=$cap tune=${chineseTop1(tuneSet, 77)} held=${chineseTop1(heldSet, 1234)}")
+        }
+        GlideTyping.priorCap = Float.MAX_VALUE
+    }
+
+    /** why do Chinese glides miss: same key path (only frequency can decide), frequency, or geometry */
+    @Test
+    fun glide_miss_analysis() {
+        assumeTrue(ready() && System.getenv("IFB_TUNE") != null)
+        val g = KeyboardGeometryForTest.qwerty()
+        for (mode in listOf(GlideTyping.Mode.Flypy, GlideTyping.Mode.Pinyin)) {
+            load(mode)
+            val d = GlideTyping.dictFor(mode)!!
+            val idx = HashMap<String, Int>(d.codes.size * 2).apply { d.codes.forEachIndexed { i, c -> put(c, i) } }
+            fun path(c: String) = buildString { for (ch in c) if (isEmpty() || last() != ch) append(ch) }
+            val rnd = Random(77)
+            var tot = 0; var miss = 0; var samePath = 0; var winnerMoreFreq = 0; var notInTop5 = 0
+            var lenDiff = 0
+            val ex = ArrayList<String>()
+            for (id in sample(mode, 4000, 400, 21)) {
+                val code = d.codes[id]
+                val noise = 0.15f + 0.20f * rnd.nextFloat()
+                val xy = KeyboardGeometryForTest.synthGlide(code, g, rnd, noise) ?: continue
+                val res = GlideTyping.decode(xy, xy.size / 2, g, mode, limit = 5)
+                tot++
+                val w = res.firstOrNull() ?: continue
+                if (w.code == code) continue
+                miss++
+                if (path(w.code) == path(code)) samePath++
+                val wf = d.freq[idx[w.code]!!]; val cf = d.freq[id]
+                if (wf > cf) winnerMoreFreq++
+                if (res.none { it.code == code }) notInTop5++
+                if (path(w.code).length != path(code).length) lenDiff++
+                if (ex.size < 25) ex.add("$code(${d.outputs[id]},${"%.1f".format(cf)})->${w.code}(${w.output},${"%.1f".format(wf)})")
+            }
+            println("[miss] $mode tot=$tot miss=$miss samePath=$samePath winnerMoreFreq=$winnerMoreFreq " +
+                "keyCountDiffers=$lenDiff notInTop5=$notInTop5")
+            println("[miss]   " + ex.joinToString(" "))
+        }
+    }
+
     @Test
     fun glide_benchmark() {
         assumeTrue(ready())

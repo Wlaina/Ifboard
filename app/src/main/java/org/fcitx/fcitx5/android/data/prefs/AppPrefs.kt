@@ -193,6 +193,10 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
         val glideTypingTrail = switch(R.string.glide_typing_trail, "glide_typing_trail", true) {
             glideTyping.getValue()
         }
+        init {
+            // 邻键纠错学到的触摸习惯：查看与重置（不是普通的偏好值，数据在 TypoCorrector 里）
+            ManagedPreferenceUi.TouchModel(R.string.touch_model_title, "ifb_touch_model").registerUi()
+        }
         // Gboard style English typing (English keyboard only)
         val englishAutoCorrect =
             switch(R.string.gb_auto_correct, "gb_auto_correct", true)

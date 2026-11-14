@@ -276,7 +276,7 @@ class IfboardFragment : PaddingPreferenceFragment() {
                 key = "ifb_gram_update"
                 title = "检查语法模型更新"
                 isIconSpaceReserved = false
-                summary = "从万象官方发布页检查是否有新版本"
+                summary = "从万象官方发布页检查是否有新版本（GitHub 连不上时自动改用作者的国内镜像）"
                 setOnPreferenceClickListener { checkGramUpdate(); true }
             })
             gramDelete = Preference(ctx).apply {
@@ -389,7 +389,7 @@ class IfboardFragment : PaddingPreferenceFragment() {
                     AlertDialog.Builder(ctx)
                         .setTitle(if (installed) "语法模型有新版本" else "下载语法模型")
                         .setMessage(
-                            "官方 ${r.updated.take(10)} 版，${GrammarModel.mb(r.size)}。" +
+                            "官方 ${r.updated.take(10)} 版，${GrammarModel.mb(r.size)}，来源：${r.source}。" +
                                 (if (installed) "\n\n下载完成前继续使用旧模型，完成后自动替换。" else "") +
                                 "\n\n建议连接 Wi-Fi 后下载。"
                         )

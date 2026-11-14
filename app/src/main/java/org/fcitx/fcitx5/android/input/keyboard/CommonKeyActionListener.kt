@@ -100,9 +100,9 @@ class CommonKeyActionListener :
                         horizontalCandidate.commitPrimaryCorrection() -> Unit
                     else -> {
                         when (action.sym.sym) {
-                            FcitxKeyMapping.FcitxKey_BackSpace -> FlypyTypoCorrector.popLast()
+                            FcitxKeyMapping.FcitxKey_BackSpace -> TypoCorrector.popLast()
                             // 空格上屏 Rime 首选：按原样按键学习触摸习惯
-                            FcitxKeyMapping.FcitxKey_space -> FlypyTypoCorrector.onLiteralCommitted()
+                            FcitxKeyMapping.FcitxKey_space -> TypoCorrector.onLiteralCommitted()
                         }
                         service.postFcitxJob {
                             sendKey(action.sym, action.states)
@@ -169,7 +169,7 @@ class CommonKeyActionListener :
                         Stopped -> {}
                         Selection -> service.deleteSelection()
                         Reset -> if (action.totalCnt < 0) { // swipe left
-                            FlypyTypoCorrector.clear()
+                            TypoCorrector.clear()
                             service.postFcitxJob { reset() }
                         }
                     }
