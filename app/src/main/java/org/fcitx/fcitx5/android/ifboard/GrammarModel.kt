@@ -160,12 +160,25 @@ object GrammarModel {
     }
 
     /** true when upstream has a different file than the installed one */
-    fun isNewer(ctx: Context, r: Remote): Boolean {
-        if (!installed(ctx)) return true
-        val digest = prefs(ctx).getString(PREF_DIGEST, null)
-        // a copy installed without metadata (e.g. carried over from an old version): compare by size
-        if (digest == null) return file(ctx).length() != r.size
-        return r.sha256 != null && r.sha256 != digest
+    suspend fun isNewer(ctx: Context, r: Remote): Boolean = withContext(Dispatchers.IO) {
+        if (!installed(ctx)) return@withContext true
+        val f = file(ctx)
+        if (f.length() != r.size) return@withContext true
+        val remoteSha = r.sha256 ?: return@withContext false
+        val pp = prefs(ctx)
+        val digest = pp.getString(PREF_DIGEST, null)
+        if (digest == remoteSha) return@withContext false
+        // 文件大小已一致（例如通过 USB 放入新版）：核对本地 SHA-256，匹配则自动对齐元数据
+        val actualSha = sha256(f)
+        if (actualSha == remoteSha) {
+            pp.edit()
+                .putString(PREF_DIGEST, actualSha)
+                .putString(PREF_UPDATED, r.updated)
+                .apply()
+            false
+        } else {
+            true
+        }
     }
 
     private class FatalTransferException(message: String) : IllegalStateException(message)

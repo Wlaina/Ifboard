@@ -585,6 +585,7 @@ class IfboardFragment : PaddingPreferenceFragment() {
             runCatching { GrammarModel.fetchRemote() }
                 .onSuccess { r ->
                     if (!GrammarModel.isNewer(ctx, r)) {
+                        renderGram(GrammarModel.state.value)
                         Toast.makeText(ctx, "语法模型已是最新（官方 ${r.updated.take(10)} 版）", Toast.LENGTH_SHORT).show()
                         return@onSuccess
                     }

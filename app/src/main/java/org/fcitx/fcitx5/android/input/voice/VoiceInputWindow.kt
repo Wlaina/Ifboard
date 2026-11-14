@@ -27,6 +27,7 @@ import org.fcitx.fcitx5.android.input.FcitxInputMethodService
 import org.fcitx.fcitx5.android.input.dependency.fcitx
 import org.fcitx.fcitx5.android.input.dependency.inputMethodService
 import org.fcitx.fcitx5.android.input.dependency.theme
+import org.fcitx.fcitx5.android.input.inline.VoiceBar
 import org.fcitx.fcitx5.android.input.keyboard.KeyboardWindow
 import org.fcitx.fcitx5.android.input.wm.InputWindow
 import org.fcitx.fcitx5.android.input.wm.InputWindowManager
@@ -39,7 +40,7 @@ class VoiceInputWindow : InputWindow.ExtendedInputWindow<VoiceInputWindow>() {
 
     companion object {
         fun isAvailable(service: FcitxInputMethodService) =
-            SpeechRecognizer.isRecognitionAvailable(service)
+            VoiceBar.isAvailable(service)
     }
 
     private val service: FcitxInputMethodService by manager.inputMethodService()
@@ -173,9 +174,13 @@ class VoiceInputWindow : InputWindow.ExtendedInputWindow<VoiceInputWindow>() {
             hintText.text = "请在系统设置中允许 Ifboard 使用麦克风"
             return
         }
-        val r = recognizer ?: SpeechRecognizer.createSpeechRecognizer(service).also {
+        val r = recognizer ?: VoiceBar.createSpeechRecognizer(service)?.also {
             it.setRecognitionListener(listener)
             recognizer = it
+        } ?: run {
+            statusText.text = "未安装语音识别服务"
+            hintText.text = "请安装 Google 语音服务"
+            return
         }
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)

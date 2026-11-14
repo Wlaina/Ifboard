@@ -6,6 +6,7 @@
 package org.fcitx.fcitx5.android.input.inline
 
 import android.Manifest
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -13,10 +14,14 @@ import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.speech.RecognitionListener
+import android.speech.RecognitionService
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.text.TextUtils
@@ -402,6 +407,7 @@ class VoiceBar(
     private var recognizer: SpeechRecognizer? = null
     private var listening = false
     private var ready = false
+    private var triedExplicitFallback = false
     private var sessionSeq = 0
     private var finalizedSeq = -1
     private var lastPartial = ""
@@ -521,9 +527,14 @@ class VoiceBar(
                 }
                 SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> status.text = "需要麦克风权限"
                 SpeechRecognizer.ERROR_CLIENT, SpeechRecognizer.ERROR_SERVER_DISCONNECTED -> {
-                    // the recognition service could not be reached (e.g. hidden by the system)
+                    // the recognition service could not be reached (e.g. voice_recognition_service unset on OriginOS)
                     recognizer?.destroy(); recognizer = null
-                    showUnavailable()
+                    if (!triedExplicitFallback && active) {
+                        triedExplicitFallback = true
+                        listen(forceExplicitComponent = true)
+                    } else {
+                        showUnavailable()
+                    }
                 }
                 SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> status.text = "网络不可用"
                 else -> status.text = "语音识别暂不可用"
@@ -562,6 +573,9 @@ class VoiceBar(
     fun start() {
         if (active) { stop(); return }
         active = true
+        triedExplicitFallback = false
+        status.setOnClickListener(null)
+        status.isClickable = false
         root.animate().cancel()
         root.visibility = View.VISIBLE
         root.alpha = 0f
@@ -574,7 +588,7 @@ class VoiceBar(
         listen()
     }
 
-    private fun listen() {
+    private fun listen(forceExplicitComponent: Boolean = false) {
         if (ContextCompat.checkSelfPermission(service, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             // a fresh install has no microphone permission yet: ask for it like Gboard does
             status.text = "需要麦克风权限，请在弹出的窗口中允许"
@@ -582,7 +596,7 @@ class VoiceBar(
             handler.postDelayed({ stop() }, 1500)
             return
         }
-        val r = recognizer ?: createRecognizer()?.also {
+        val r = recognizer ?: createSpeechRecognizer(service, forceExplicitComponent)?.also {
             it.setRecognitionListener(listener); recognizer = it
         } ?: run {
             showUnavailable()
@@ -598,50 +612,65 @@ class VoiceBar(
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 100L)
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, service.packageName)
         }
+        status.setOnClickListener(null)
+        status.isClickable = false
         status.text = "正在听取…"
-        sessionSeq++
+        val seq = ++sessionSeq
         lastPartial = ""
         eosMs = 0L
         listening = true
         ready = false
         r.startListening(intent)
-        // a recognizer that cannot be reached (e.g. hidden by the system) never calls back
+        // a recognizer that cannot be reached (e.g. hidden or unconfigured by the ROM) never calls back
         handler.postDelayed({
-            if (active && listening && !ready) {
+            if (active && listening && !ready && sessionSeq == seq) {
                 recognizer?.destroy(); recognizer = null
-                showUnavailable()
+                if (!triedExplicitFallback) {
+                    triedExplicitFallback = true
+                    listen(forceExplicitComponent = true)
+                } else {
+                    showUnavailable()
+                }
             }
         }, 3500)
     }
 
-    /** system recognizer, else the on-device one, else Google's service addressed directly */
-    private fun createRecognizer(): SpeechRecognizer? = runCatching {
-        when {
-            SpeechRecognizer.isRecognitionAvailable(service) -> SpeechRecognizer.createSpeechRecognizer(service)
-            android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S &&
-                    SpeechRecognizer.isOnDeviceRecognitionAvailable(service) ->
-                SpeechRecognizer.createOnDeviceSpeechRecognizer(service)
-            googleRecognizerInstalled() -> SpeechRecognizer.createSpeechRecognizer(
-                service, android.content.ComponentName(GooglePackage, GoogleRecognizer)
-            )
-            else -> null
-        }
-    }.getOrNull()
-
-    private fun googleRecognizerInstalled() = runCatching {
-        service.packageManager.getPackageInfo(GooglePackage, 0); true
-    }.getOrDefault(false)
-
     private fun showUnavailable() {
         listening = false
-        status.text = "这台手机没有可用的语音识别服务"
-        handler.postDelayed({ if (active) stop() }, 2500)
+        if (resolveRecognitionService(service) == null) {
+            status.text = "未安装语音识别服务（点此安装 Google 语音服务）"
+            status.setOnClickListener { openSpeechServiceStore() }
+            handler.postDelayed({ if (active) stop() }, 6000)
+        } else {
+            status.setOnClickListener(null)
+            status.isClickable = false
+            status.text = "语音识别服务暂不可用"
+            handler.postDelayed({ if (active) stop() }, 3000)
+        }
+    }
+
+    private fun openSpeechServiceStore() {
+        val uris = listOf(
+            Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$GoogleTtsPackage"))
+                .setPackage("com.android.vending"),
+            Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$GoogleTtsPackage")),
+            Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=$GoogleTtsPackage"))
+        )
+        for (i in uris) {
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (runCatching { service.startActivity(i); true }.getOrDefault(false)) {
+                stop()
+                return
+            }
+        }
     }
 
     fun stop() {
         if (!active) return
         active = false
         handler.removeCallbacksAndMessages(null)
+        status.setOnClickListener(null)
+        status.isClickable = false
         recognizer?.destroy(); recognizer = null
         service.currentInputConnection?.finishComposingText()
         pulse.animate().cancel()
@@ -653,8 +682,83 @@ class VoiceBar(
 
     companion object {
         private const val MicSize = 30
+        private const val GoogleTtsPackage = "com.google.android.tts"
+        private const val GoogleTtsRecognizer =
+            "com.google.android.apps.speech.tts.googletts.service.GoogleTTSRecognitionService"
         private const val GooglePackage = "com.google.android.googlequicksearchbox"
         private const val GoogleRecognizer = "com.google.android.voicesearch.serviceapi.GoogleRecognitionService"
         private const val MaxPulse = 38f / MicSize
+
+        fun isAvailable(ctx: Context): Boolean =
+            SpeechRecognizer.isRecognitionAvailable(ctx) ||
+                resolveRecognitionService(ctx) != null ||
+                (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                    SpeechRecognizer.isOnDeviceRecognitionAvailable(ctx))
+
+        fun resolveRecognitionService(ctx: Context): ComponentName? {
+            val pm = ctx.packageManager
+            Settings.Secure.getString(ctx.contentResolver, "voice_recognition_service")
+                ?.takeIf { it.isNotBlank() }
+                ?.let(ComponentName::unflattenFromString)
+                ?.takeIf { isServiceEnabled(pm, it) }
+                ?.let { return it }
+
+            val candidates = pm.queryIntentServices(Intent(RecognitionService.SERVICE_INTERFACE), 0)
+                .mapNotNull { ri ->
+                    val si = ri.serviceInfo ?: return@mapNotNull null
+                    ComponentName(si.packageName, si.name).takeIf { isServiceEnabled(pm, it) }
+                }
+            if (candidates.isNotEmpty()) {
+                return candidates.minBy {
+                    when (it.packageName) {
+                        GoogleTtsPackage -> 0
+                        GooglePackage -> 1
+                        else -> 2
+                    }
+                }
+            }
+
+            val known = listOf(
+                ComponentName(GoogleTtsPackage, GoogleTtsRecognizer),
+                ComponentName(GooglePackage, GoogleRecognizer)
+            )
+            return known.firstOrNull { isServiceEnabled(pm, it) }
+        }
+
+        fun createSpeechRecognizer(ctx: Context, forceExplicitComponent: Boolean = false): SpeechRecognizer? =
+            runCatching {
+                val pm = ctx.packageManager
+                val configured = Settings.Secure.getString(ctx.contentResolver, "voice_recognition_service")
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let(ComponentName::unflattenFromString)
+                    ?.takeIf { isServiceEnabled(pm, it) }
+                when {
+                    !forceExplicitComponent && configured != null && SpeechRecognizer.isRecognitionAvailable(ctx) ->
+                        SpeechRecognizer.createSpeechRecognizer(ctx)
+                    else -> resolveRecognitionService(ctx)?.let {
+                        SpeechRecognizer.createSpeechRecognizer(ctx, it)
+                    } ?: when {
+                        !forceExplicitComponent && SpeechRecognizer.isRecognitionAvailable(ctx) ->
+                            SpeechRecognizer.createSpeechRecognizer(ctx)
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                            SpeechRecognizer.isOnDeviceRecognitionAvailable(ctx) ->
+                            SpeechRecognizer.createOnDeviceSpeechRecognizer(ctx)
+                        else -> null
+                    }
+                }
+            }.getOrNull()
+
+        private fun isServiceEnabled(pm: PackageManager, cn: ComponentName): Boolean = runCatching {
+            val si = pm.getServiceInfo(cn, 0)
+            val svcEnabled = when (pm.getComponentEnabledSetting(cn)) {
+                PackageManager.COMPONENT_ENABLED_STATE_ENABLED -> true
+                PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER,
+                PackageManager.COMPONENT_ENABLED_STATE_DISABLED_UNTIL_USED -> false
+                else -> si.enabled
+            }
+            val appEnabled = si.applicationInfo?.enabled != false
+            svcEnabled && appEnabled
+        }.getOrDefault(false)
     }
 }
