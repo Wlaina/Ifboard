@@ -21,12 +21,20 @@ sealed class StatusAreaEntry(
             ReloadConfig,
             Keyboard,
             ThemeList,
-            FloatingKeyboard
+            FloatingKeyboard,
+            AutoSpace
         }
     }
 
     class Fcitx(val action: Action, label: String, icon: Int, active: Boolean) :
         StatusAreaEntry(label, icon, active)
+
+    /** 用于记住菜单排序的稳定标识 */
+    val orderKey: String
+        get() = when (this) {
+            is Android -> "a:" + type.name
+            is Fcitx -> "f:" + action.name
+        }
 
     companion object {
         private fun drawableFromIconName(icon: String) = when (icon) {

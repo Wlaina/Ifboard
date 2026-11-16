@@ -540,6 +540,38 @@
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
                                         <StackPanel>
+                                            <TextBlock Text="任务栏右下角显示「中 / 英」状态图标" Style="{StaticResource RowTitleStyle}" />
+                                            <TextBlock Text="控制 Windows 任务栏右下角输入指示器（「中 / 英」与输入法图标）是否显示；默认开启，关闭后开机自动维持。"
+                                                       Style="{StaticResource RowDescStyle}" />
+                                        </StackPanel>
+                                        <CheckBox x:Name="ShowTaskbarImeIconCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
+                                                  Click="ImeIconSetting_Click" />
+                                    </Grid>
+
+                                    <Border Style="{StaticResource CardDividerStyle}" />
+
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="切换中英文时弹出「中 / 英」浮动提示图标" Style="{StaticResource RowTitleStyle}" />
+                                            <TextBlock Text="控制按 Ctrl+Space / Shift 切换中英文时是否在光标旁短暂弹出「中 / 英」浮动小图标（点击即保存并部署生效）。"
+                                                       Style="{StaticResource RowDescStyle}" />
+                                        </StackPanel>
+                                        <CheckBox x:Name="ShowAsciiSwitchTipCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
+                                                  Click="ImeIconSetting_Click" />
+                                    </Grid>
+
+                                    <Border Style="{StaticResource CardDividerStyle}" />
+
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
                                             <TextBlock Text="使用 Tab 键向后翻页" Style="{StaticResource RowTitleStyle}" />
                                             <TextBlock Text="修复上游默认配置中 Tab 切分音节问题，允许在候选栏弹出时用 Tab 快速向后翻页（Shift+Tab 上一页）。"
                                                        Style="{StaticResource RowDescStyle}" />
@@ -783,6 +815,38 @@
                                         </StackPanel>
                                         <CheckBox x:Name="DisableForcedAsciiCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
                                                   Checked="SkinControl_Changed" Unchecked="SkinControl_Changed" />
+                                    </Grid>
+
+                                    <Border Style="{StaticResource CardDividerStyle}" />
+
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="任务栏右下角显示「中 / 英」状态图标" Style="{StaticResource RowTitleStyle}" />
+                                            <TextBlock Text="控制 Windows 任务栏右下角输入指示器（「中 / 英」与输入法图标）是否显示；默认开启，关闭后开机自动维持。"
+                                                       Style="{StaticResource RowDescStyle}" />
+                                        </StackPanel>
+                                        <CheckBox x:Name="ShowTaskbarImeIconSkinCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
+                                                  Click="ImeIconSetting_Click" />
+                                    </Grid>
+
+                                    <Border Style="{StaticResource CardDividerStyle}" />
+
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="切换中英文时弹出「中 / 英」浮动提示图标" Style="{StaticResource RowTitleStyle}" />
+                                            <TextBlock Text="控制小狼毫在切换中英文时是否弹出光标旁「中 / 英」小图标（show_notifications，点击即保存并部署）。"
+                                                       Style="{StaticResource RowDescStyle}" />
+                                        </StackPanel>
+                                        <CheckBox x:Name="ShowAsciiSwitchTipSkinCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
+                                                  Click="ImeIconSetting_Click" />
                                     </Grid>
 
                                     <StackPanel Orientation="Horizontal" Margin="0,14,0,0">

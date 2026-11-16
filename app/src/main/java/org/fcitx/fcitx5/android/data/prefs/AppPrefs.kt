@@ -204,6 +204,8 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
             switch(R.string.gb_auto_capitalize, "gb_auto_capitalize", false)
         val englishDoubleSpacePeriod =
             switch(R.string.gb_double_space_period, "gb_double_space_period", false)
+        val autoSpaceAfterPeriod =
+            switch(R.string.auto_space_after_period, "auto_space_after_period", false)
         val showLangSwitchKey =
             switch(R.string.show_lang_switch_key, "show_lang_switch_key", true)
         val langSwitchKeyBehavior = enumList(

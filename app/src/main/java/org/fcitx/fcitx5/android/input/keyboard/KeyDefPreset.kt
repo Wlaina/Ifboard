@@ -237,7 +237,7 @@ class ReturnKey(percentWidth: Float = 0.15f) : KeyDef(
         Popup.Menu(
             arrayOf(
                 Popup.Menu.Item(
-                    "Emoji", R.drawable.ic_baseline_tag_faces_24, KeyAction.PickerSwitchAction()
+                    "悬浮键盘", R.drawable.ic_gb_floating_keyboard, KeyAction.FloatingKeyboardToggleAction
                 )
             )
         )

@@ -77,6 +77,9 @@ abstract class BaseKeyboard(
     var popupActionListener: PopupActionListener? = null
 
     private val selectionSwipeThreshold = dp(10f)
+    /** 删除键上滑清空：松手时至少向上滑过这么远 */
+    private val clearSwipeDistance = dp(28f)
+    private val clearSwipeStep = dp(16f)
     private val inputSwipeThreshold = dp(36f)
 
     // a rather large threshold effectively disables swipe of the direction
@@ -259,19 +262,37 @@ abstract class BaseKeyboard(
                 swipeEnabled = true
                 swipeRepeatEnabled = true
                 swipeThresholdX = selectionSwipeThreshold
-                swipeThresholdY = disabledSwipeThreshold
+                // 上滑一段距离松手 = 清空输入框（左滑仍是选择删除）；纵向计数只用来屏蔽单击
+                swipeThresholdY = clearSwipeStep
+                var downX = 0f
+                var downY = 0f
+                // 按松手 / 当前位置相对按下点的整体方向判断：以向上为主就是清空，手指略歪也不会误判成左滑
+                fun isClearSwipe(x: Float, y: Float, minUp: Float): Boolean {
+                    val up = downY - y
+                    return up >= minUp && up > kotlin.math.abs(x - downX) * 1.2f
+                }
                 onGestureListener = OnGestureListener { view, event ->
                     when (event.type) {
+                        GestureType.Down -> {
+                            downX = event.x
+                            downY = event.y
+                            false
+                        }
                         GestureType.Move -> {
                             val count = event.countX
-                            if (count != 0) {
+                            // 已明显在往上滑：不再跟着横向抖动去改选区
+                            if (count != 0 && !isClearSwipe(event.x, event.y, clearSwipeStep)) {
                                 onAction(KeyAction.MoveSelectionAction(count))
                                 if (hapticOnRepeat) InputFeedbacks.hapticFeedback(view)
                                 true
                             } else false
                         }
                         GestureType.Up -> {
-                            onAction(KeyAction.DeleteSelectionAction(event.totalX))
+                            if (!(view as CustomGestureView).lastGestureCancelled && isClearSwipe(event.x, event.y, clearSwipeDistance)) {
+                                onAction(KeyAction.DeleteAllAction)
+                            } else {
+                                onAction(KeyAction.DeleteSelectionAction(event.totalX))
+                            }
                             false
                         }
                         else -> false

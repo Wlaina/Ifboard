@@ -28,6 +28,7 @@ import android.view.inputmethod.CursorAnchorInfo
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InlineSuggestionsRequest
 import android.view.inputmethod.InlineSuggestionsResponse
+import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodSubtype
 import android.widget.FrameLayout
 import android.widget.inline.InlinePresentationSpec
@@ -491,9 +492,54 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         currentInputConnection.setSelection(target, target)
     }
 
+    /** Ifboard: 自动补在「.」后面的空格所在的光标位置（-1 表示没有） */
+    private var autoSpaceCursor = -1
+    private val autoSpaceAfterPeriod by prefs.keyboard.autoSpaceAfterPeriod
+
+    private fun editorAllowsAutoSpace(): Boolean {
+        val type = currentInputEditorInfo?.inputType ?: return false
+        if (type and InputType.TYPE_MASK_CLASS != InputType.TYPE_CLASS_TEXT) return false
+        return when (type and InputType.TYPE_MASK_VARIATION) {
+            InputType.TYPE_TEXT_VARIATION_PASSWORD,
+            InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
+            InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD,
+            InputType.TYPE_TEXT_VARIATION_URI,
+            InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
+            InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,
+            InputType.TYPE_TEXT_VARIATION_FILTER -> false
+            else -> true
+        }
+    }
+
+    /**
+     * 「输入 . 后自动加空格」：返回实际要提交的文本，null 表示这次提交被吞掉
+     * （紧跟自动空格之后用户又按了空格）。
+     */
+    private fun applyAutoSpaceAfterPeriod(text: String, ic: InputConnection): String? {
+        val prevAuto = autoSpaceCursor
+        autoSpaceCursor = -1
+        if (!autoSpaceAfterPeriod || composing.isNotEmpty()) return text
+        val cursorNow = selection.latest.start
+        val justAutoSpaced = prevAuto >= 0 && prevAuto == cursorNow && selection.latest.end == cursorNow
+        if (text == " " && justAutoSpaced) return null
+        if (text != "." || !editorAllowsAutoSpace()) return text
+        val before = ic.getTextBeforeCursor(2, 0)?.toString().orEmpty()
+        if (justAutoSpaced && before.endsWith(". ")) {
+            // 连续输入「...」：把上一个自动空格挪到最后一个句点后面
+            ic.deleteSurroundingText(1, 0)
+            selection.predict(cursorNow - 1)
+        } else if (before.lastOrNull()?.isDigit() == true) {
+            return text // 小数点 3.14
+        }
+        autoSpaceCursor = selection.latest.start + 2
+        return ". "
+    }
+
     fun commitText(text: String, cursor: Int = -1) {
         textInterceptor?.let { it.onCommit(text); return }
         val ic = currentInputConnection ?: return
+        @Suppress("NAME_SHADOWING")
+        val text = applyAutoSpaceAfterPeriod(text, ic) ?: return
         // when composing text equals commit content, finish composing text as-is
         if (composing.isNotEmpty() && composingText.toString() == text) {
             val c = if (cursor == -1) text.length else cursor
@@ -555,6 +601,30 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
                 KeyEvent.FLAG_SOFT_KEYBOARD or KeyEvent.FLAG_KEEP_TOUCH_MODE
             )
         )
+    }
+
+    /** 清空输入框：选中内容与光标前后全部文字，作为一次批量编辑 */
+    fun deleteAllText() {
+        val ic = currentInputConnection ?: return
+        ic.beginBatchEdit()
+        try {
+            ic.finishComposingText()
+            // 全选后一次性删除：编辑器把它记成一步，误清空时一次撤销就能全部找回
+            if (ic.performContextMenuAction(android.R.id.selectAll)) {
+                ic.commitText("", 1)
+                return
+            }
+            if (ic.getSelectedText(0)?.isNotEmpty() == true) ic.commitText("", 1)
+            // 不支持全选的编辑器：分批删，直到光标前后都没有文字
+            for (i in 0 until 50) {
+                val before = ic.getTextBeforeCursor(DeleteAllChunk, 0)?.length ?: 0
+                val after = ic.getTextAfterCursor(DeleteAllChunk, 0)?.length ?: 0
+                if (before == 0 && after == 0) break
+                ic.deleteSurroundingText(before, after)
+            }
+        } finally {
+            ic.endBatchEdit()
+        }
     }
 
     fun deleteSelection() {
@@ -979,6 +1049,12 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         newComposingEnd: Int,
         updateIndex: Int
     ) {
+        // Ifboard: 翻译栏工作时编辑框里的 composing 是译文，不属于 fcitx，不能据此 reset 正在输入的拼音
+        textInterceptor?.let {
+            selection.resetTo(newSelStart, newSelEnd)
+            it.onEditorSelectionChanged(newSelStart, newSelEnd, newComposingStart, newComposingEnd)
+            return
+        }
         if (selection.consume(newSelStart, newSelEnd)) {
             // try restore composing range in case it was dropped by InputFilter
             // but only when prediction matches, since InputFilter can also change editor content
@@ -1175,6 +1251,8 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
             monitorCursorAnchor(false)
         }
         resetComposingState()
+        // 收起键盘时必须停止语音识别，否则识别器会自动续听并一直占用麦克风
+        inputView?.stopInlineVoice()
         postFcitxJob {
             focusOutIn()
         }
@@ -1203,6 +1281,7 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     }
 
     override fun onDestroy() {
+        inputView?.stopInlineVoice()
         screenshotDebounceJob?.cancel()
         mediaScreenshotObserver?.let { runCatching { contentResolver.unregisterContentObserver(it) } }
         smsOtpObserver?.let { runCatching { contentResolver.unregisterContentObserver(it) } }
@@ -1239,6 +1318,7 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
 
     @Suppress("ConstPropertyName")
     companion object {
+        private const val DeleteAllChunk = 100_000
         const val DeleteSurroundingFlag = "org.fcitx.fcitx5.android.DELETE_SURROUNDING"
     }
 }

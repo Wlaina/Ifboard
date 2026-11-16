@@ -63,6 +63,8 @@ interface TextInterceptor {
     fun onBackspace(): Boolean
     /** @return true if consumed */
     fun onReturn(): Boolean
+    /** 编辑框光标 / composing 区域变化（拦截期间由拦截者自行处理，不交给 fcitx 重置） */
+    fun onEditorSelectionChanged(selStart: Int, selEnd: Int, composingStart: Int, composingEnd: Int) {}
 }
 
 private fun Context.dpf(v: Float) = v * resources.displayMetrics.density
@@ -98,7 +100,10 @@ class TranslatePanel(
 
     private val buffer = StringBuilder()
     private var composing = ""
+    /** 当前以 composing（下划线）形式放在编辑框里的译文，Gboard 同款：回车 / 关闭翻译时才定稿 */
     private var lastInserted = ""
+    /** lastInserted 对应的原文，用于判断译文是否已是最新 */
+    private var translatedFor = ""
     private var job: Job? = null
 
     var active = false
@@ -264,11 +269,14 @@ class TranslatePanel(
         if (on == active) return
         active = on
         if (on) {
-            buffer.clear(); composing = ""; lastInserted = ""
+            buffer.clear(); composing = ""; lastInserted = ""; translatedFor = ""
             service.textInterceptor = this
         } else {
             if (service.textInterceptor === this) service.textInterceptor = null
             job?.cancel()
+            // 关闭翻译时保留已经出现在编辑框里的译文
+            commitOutput()
+            buffer.clear(); composing = ""
             popupListener?.apply {
                 onPopupAction(PopupAction.DismissAction(srcButton.id))
                 onPopupAction(PopupAction.DismissAction(dstButton.id))
@@ -336,8 +344,20 @@ class TranslatePanel(
         composing = text; updateInput()
     }
 
+    /**
+     * Gboard 方式：翻译框有原文时退格删原文（编辑框里的译文随之更新，原文删空时译文一并移除）；
+     * 翻译框为空时退格交给编辑框，正常删除已定稿的内容。
+     */
     override fun onBackspace(): Boolean {
-        if (buffer.isEmpty()) return false
+        if (buffer.isEmpty()) {
+            // 原文已空但编辑框里还留着未定稿译文（例如网络返回晚了）：先把它删掉
+            if (lastInserted.isNotEmpty()) {
+                job?.cancel()
+                write("")
+                return true
+            }
+            return false
+        }
         buffer.deleteCharAt(buffer.length - 1)
         updateInput(); retranslate()
         return true
@@ -345,32 +365,60 @@ class TranslatePanel(
 
     override fun onReturn(): Boolean {
         if (buffer.isEmpty()) return false
-        // keep the translation in the editor, start a new sentence
-        buffer.clear(); composing = ""; lastInserted = ""
+        // 定稿当前译文，开始新的一句；若译文还没回来，等它回来再定稿
+        val q = buffer.toString()
+        buffer.clear(); composing = ""
         updateInput()
+        job?.cancel()
+        if (q == translatedFor) {
+            commitOutput()
+        } else {
+            job = scope.launch {
+                val out = withContext(Dispatchers.IO) { translate(q, src, dst) }
+                if (out != null) write(out, q)
+                commitOutput()
+            }
+        }
         return true
+    }
+
+    override fun onEditorSelectionChanged(selStart: Int, selEnd: Int, composingStart: Int, composingEnd: Int) {
+        // 应用或用户把 composing 结束了（点了别处、应用自行定稿）：视为译文已定稿，下一句重新开始
+        if (lastInserted.isNotEmpty() && composingStart < 0 && composingEnd < 0) {
+            job?.cancel()
+            lastInserted = ""; translatedFor = ""
+            buffer.clear(); composing = ""
+            updateInput()
+        }
     }
 
     private fun retranslate() {
         job?.cancel()
         val q = buffer.toString()
+        if (q.isBlank()) {
+            // 原文删空：立即移除编辑框里的译文，不等防抖
+            write("")
+            return
+        }
         job = scope.launch {
             delay(350)
-            val out = if (q.isBlank()) "" else withContext(Dispatchers.IO) { translate(q, src, dst) } ?: return@launch
-            write(out)
+            val out = withContext(Dispatchers.IO) { translate(q, src, dst) } ?: return@launch
+            write(out, q)
         }
     }
 
-    private fun write(out: String) {
+    private fun write(out: String, source: String = "") {
         val ic = service.currentInputConnection ?: return
-        ic.beginBatchEdit()
-        if (lastInserted.isNotEmpty()) {
-            val before = ic.getTextBeforeCursor(lastInserted.length, 0)?.toString()
-            if (before == lastInserted) ic.deleteSurroundingText(lastInserted.length, 0)
-        }
-        if (out.isNotEmpty()) ic.commitText(out, 1)
-        ic.endBatchEdit()
+        if (out.isEmpty() && lastInserted.isEmpty()) return
+        // 用 composing 区域承载译文，替换 / 删除不再依赖 getTextBeforeCursor 比对（微信等编辑框常比对失败）
+        ic.setComposingText(out, 1)
         lastInserted = out
+        translatedFor = if (out.isEmpty()) "" else source
+    }
+
+    private fun commitOutput() {
+        if (lastInserted.isNotEmpty()) service.currentInputConnection?.finishComposingText()
+        lastInserted = ""; translatedFor = ""
     }
 
     companion object {
@@ -404,6 +452,8 @@ class VoiceBar(
     private val languageProvider: () -> String
 ) {
     private val handler = Handler(Looper.getMainLooper())
+    /** 回收查询 / 下载用的临时识别器；stop() 不清它，避免临时识别器泄漏 */
+    private val cleanupHandler = Handler(Looper.getMainLooper())
     private var recognizer: SpeechRecognizer? = null
     private var listening = false
     private var ready = false
@@ -412,6 +462,18 @@ class VoiceBar(
     private var finalizedSeq = -1
     private var lastPartial = ""
     private var eosMs = 0L
+    private var currentLang = ""
+    /** 识别服务不支持分段会话（立即报错）时回退到逐句模式 */
+    private var segmentedUnsupported = false
+    private var sessionStartMs = 0L
+    private var segmentedSession = false
+    private var lastPulseScale = 1f
+    /** 当前分段内是否收到过实时部分结果 */
+    private var partialSeenInSegment = false
+    // 仅记录耗时（毫秒），不记录识别内容
+    private var speechBeginMs = 0L
+    private var firstPartialLogged = false
+    private var lastPartialMs = 0L
 
     private val endFallbackRunnable = Runnable {
         if (!active || finalizedSeq == sessionSeq) return@Runnable
@@ -493,18 +555,26 @@ class VoiceBar(
         override fun onReadyForSpeech(params: Bundle?) {
             ready = true
             status.text = "正在听取…"
+            Timber.i("IfboardVoiceT ready +%dms offline=%s segmented=%s", System.currentTimeMillis() - sessionStartMs, preferOffline, segmentedSession)
         }
-        override fun onBeginningOfSpeech() {}
+        override fun onBeginningOfSpeech() {
+            speechBeginMs = System.currentTimeMillis()
+            firstPartialLogged = false
+        }
         override fun onRmsChanged(rmsdB: Float) {
             // at most 38dp across, the bar is 40dp high
             val s = 1f + (rmsdB.coerceIn(0f, 10f) / 10f) * (MaxPulse - 1f)
+            // 识别服务每秒回调 ~20 次：变化不明显时不再新建动画，省掉无效的重绘
+            if (kotlin.math.abs(s - lastPulseScale) < 0.04f) return
+            lastPulseScale = s
             pulse.animate().scaleX(s).scaleY(s).setDuration(90).start()
         }
         override fun onBufferReceived(buffer: ByteArray?) {}
         override fun onEndOfSpeech() {
             eosMs = System.currentTimeMillis()
             pulse.animate().scaleX(1f).scaleY(1f).setDuration(150).start()
-            if (lastPartial.isNotEmpty() && finalizedSeq != sessionSeq) {
+            // 分段会话由 onSegmentResults 负责上屏，不能提前 cancel 掉整段会话
+            if (!segmentedSession && lastPartial.isNotEmpty() && finalizedSeq != sessionSeq) {
                 handler.removeCallbacks(endFallbackRunnable)
                 handler.postDelayed(endFallbackRunnable, 120L)
             }
@@ -512,6 +582,16 @@ class VoiceBar(
         override fun onError(error: Int) {
             handler.removeCallbacks(endFallbackRunnable)
             listening = false
+            if (!ready && !segmentedUnsupported && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                (error == SpeechRecognizer.ERROR_CLIENT || error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ||
+                    error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE) &&
+                System.currentTimeMillis() - sessionStartMs < 1500
+            ) {
+                segmentedUnsupported = true
+                Timber.w("IfboardVoice: segmented session rejected (%d), fall back to per-utterance mode", error)
+                if (active) handler.postDelayed({ if (active && !listening) listen() }, 40)
+                return
+            }
             val text = lastPartial
             if (text.isNotEmpty() && finalizedSeq != sessionSeq) {
                 finalizedSeq = sessionSeq
@@ -562,12 +642,69 @@ class VoiceBar(
             val unstable = partialResults?.getString("android.speech.extra.UNSTABLE_TEXT").orEmpty()
             val text = stable + unstable
             if (text.isNotEmpty()) {
+                val now = System.currentTimeMillis()
+                if (!firstPartialLogged && speechBeginMs > 0) {
+                    firstPartialLogged = true
+                    Timber.i("IfboardVoiceT first-partial +%dms after speech begin", now - speechBeginMs)
+                } else if (lastPartialMs > 0 && now - lastPartialMs > 700) {
+                    Timber.i("IfboardVoiceT partial gap %dms", now - lastPartialMs)
+                }
+                lastPartialMs = now
+                partialSeenInSegment = true
                 lastPartial = text
                 service.currentInputConnection?.setComposingText(text, 1)
                 status.text = text
             }
         }
         override fun onEvent(eventType: Int, params: Bundle?) {}
+
+        // Android 13+ 连续听写：一次会话内按停顿分段输出，不再每句话销毁重启识别器（Gboard 同款思路）
+        override fun onSegmentResults(segmentResults: Bundle) {
+            handler.removeCallbacks(endFallbackRunnable)
+            val text = segmentResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                ?.firstOrNull().orEmpty().ifEmpty { lastPartial }
+            if (text.isNotEmpty() && !partialSeenInSegment) {
+                // 识别服务在分段模式下不推送实时文字时，出字反而要等整段说完：之后改回逐句模式（有实时文字）
+                segmentedUnsupported = true
+                Timber.w("IfboardVoice: no partial results in segmented session, fall back to per-utterance mode")
+                runCatching { recognizer?.cancel() }
+                listening = false
+                handler.postDelayed({ if (active && !listening) listen() }, 40)
+            }
+            Timber.i("IfboardVoiceT segment +%dms after last partial", if (lastPartialMs > 0) System.currentTimeMillis() - lastPartialMs else -1)
+            partialSeenInSegment = false
+            firstPartialLogged = false
+            lastPartial = ""
+            val ic = service.currentInputConnection
+            if (text.isNotEmpty()) ic?.commitText(text, 1) else ic?.finishComposingText()
+            status.text = "正在听取…"
+        }
+
+        override fun onEndOfSegmentedSession() {
+            handler.removeCallbacks(endFallbackRunnable)
+            listening = false
+            finalizedSeq = sessionSeq
+            if (lastPartial.isNotEmpty()) service.currentInputConnection?.finishComposingText()
+            lastPartial = ""
+            if (active) handler.postDelayed({ if (active && !listening) listen() }, 40)
+        }
+    }
+
+    /**
+     * 键盘语言（输入法）切换后，用新语言重新开始识别；已识别出的内容先上屏，避免切换后无法输出。
+     */
+    fun onLanguageChanged() {
+        if (!active) return
+        val lang = languageProvider()
+        if (lang == currentLang) return
+        handler.removeCallbacks(endFallbackRunnable)
+        if (lastPartial.isNotEmpty()) service.currentInputConnection?.commitText(lastPartial, 1)
+        else service.currentInputConnection?.finishComposingText()
+        lastPartial = ""
+        finalizedSeq = sessionSeq
+        runCatching { recognizer?.cancel() }
+        listening = false
+        handler.postDelayed({ if (active && !listening) listen() }, 60)
     }
 
     fun start() {
@@ -585,8 +722,95 @@ class VoiceBar(
             .setInterpolator(android.view.animation.OvershootInterpolator(2.5f)).start()
         status.text = "请稍候…"
         onActiveChanged?.invoke(true)
+        probeOfflineSupport()
         listen()
     }
+
+    private var preferOffline = false
+
+    /**
+     * Android 13+：查询识别服务已安装的离线语言；当前语言支持离线但还没下载时，请求后台下载一次。
+     * 用独立的识别器查询，避免与正在进行的听写互相占用。
+     */
+    private fun probeOfflineSupport() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val lang = languageProvider()
+        if (offlineLangs != null && lang in probedLangs) return
+        probedLangs += lang
+        val probe = createSpeechRecognizer(service) ?: return
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang)
+        }
+        runCatching {
+            probe.checkRecognitionSupport(intent, ContextCompat.getMainExecutor(service),
+                object : android.speech.RecognitionSupportCallback {
+                    override fun onSupportResult(support: android.speech.RecognitionSupport) {
+                        val installed = support.installedOnDeviceLanguages.toSet()
+                        offlineLangs = installed
+                        val supported = support.supportedOnDeviceLanguages
+                        val pending = support.pendingOnDeviceLanguages
+                        Timber.i(
+                            "IfboardVoiceT support lang=%s installed=%s pending=%s supportedHasLang=%s",
+                            lang, installed, pending, supported.any { langMatches(it, lang) }
+                        )
+                        if (!installed.any { langMatches(it, lang) } && !pending.any { langMatches(it, lang) } &&
+                            supported.any { langMatches(it, lang) } && lang !in downloadRequested
+                        ) {
+                            downloadRequested += lang
+                            // 用新的识别器发下载请求（查询用的识别器可能已因回调报错被回收）
+                            createSpeechRecognizer(service)?.let { dl ->
+                                val ok = runCatching {
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                                        dl.triggerModelDownload(intent, ContextCompat.getMainExecutor(service),
+                                            object : android.speech.ModelDownloadListener {
+                                                private var lastLogged = -10
+                                                override fun onProgress(completedPercent: Int) {
+                                                    if (completedPercent - lastLogged >= 10) {
+                                                        lastLogged = completedPercent
+                                                        Timber.i("IfboardVoiceT model %s download %d%%", lang, completedPercent)
+                                                    }
+                                                }
+                                                override fun onSuccess() {
+                                                    Timber.i("IfboardVoiceT model %s downloaded", lang)
+                                                    // 下载完成后下次听写即走离线
+                                                    offlineLangs = (offlineLangs ?: emptySet()) + lang
+                                                }
+                                                override fun onScheduled() {
+                                                    Timber.i("IfboardVoiceT model %s download scheduled", lang)
+                                                }
+                                                override fun onError(error: Int) {
+                                                    Timber.i("IfboardVoiceT model %s download error %d", lang, error)
+                                                    downloadRequested -= lang
+                                                }
+                                            })
+                                    } else {
+                                        dl.triggerModelDownload(intent)
+                                    }
+                                }.isSuccess
+                                Timber.i("IfboardVoiceT requested offline model download for %s ok=%s", lang, ok)
+                                cleanupHandler.postDelayed({ runCatching { dl.destroy() } }, 10 * 60_000L)
+                            }
+                        }
+                        cleanupHandler.postDelayed({ runCatching { probe.destroy() } }, 3000)
+                        // 首次会话已按在线方式开始：还没出字就立即换成离线识别
+                        if (active && listening && !preferOffline && lastPartial.isEmpty() && isOfflineInstalled(currentLang)) {
+                            runCatching { recognizer?.cancel() }
+                            listening = false
+                            handler.postDelayed({ if (active && !listening) listen() }, 40)
+                        }
+                    }
+
+                    override fun onError(error: Int) {
+                        Timber.i("IfboardVoiceT support check error %d", error)
+                        // 部分服务先报错再给结果，延后回收
+                        cleanupHandler.postDelayed({ runCatching { probe.destroy() } }, 3000)
+                    }
+                })
+        }.onFailure { runCatching { probe.destroy() } }
+    }
+
+    private fun isOfflineInstalled(lang: String) = offlineLangs?.any { langMatches(it, lang) } == true
 
     private fun listen(forceExplicitComponent: Boolean = false) {
         if (ContextCompat.checkSelfPermission(service, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -602,15 +826,31 @@ class VoiceBar(
             showUnavailable()
             return
         }
+        val lang = languageProvider()
+        currentLang = lang
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, languageProvider())
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, lang)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 240L)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 120L)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 100L)
+            putExtra("android.speech.extra.DICTATION_MODE", true)
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, service.packageName)
+            // 本机已装离线模型时直接走离线识别：不经网络往返，实时文字明显更快（Gboard 默认也是离线优先）
+            preferOffline = isOfflineInstalled(lang)
+            if (preferOffline) putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+            segmentedSession = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !segmentedUnsupported
+            if (segmentedSession) {
+                // 分段会话：停顿只产生分段结果，整段会话持续收音，省掉每句话重启识别器的 0.5~1 秒空窗
+                putExtra(RecognizerIntent.EXTRA_SEGMENTED_SESSION, RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, SegmentedSessionMillis)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 600L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 300L)
+            } else {
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 240L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 120L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 100L)
+            }
         }
         status.setOnClickListener(null)
         status.isClickable = false
@@ -620,6 +860,8 @@ class VoiceBar(
         eosMs = 0L
         listening = true
         ready = false
+        sessionStartMs = System.currentTimeMillis()
+        partialSeenInSegment = false
         r.startListening(intent)
         // a recognizer that cannot be reached (e.g. hidden or unconfigured by the ROM) never calls back
         handler.postDelayed({
@@ -671,7 +913,12 @@ class VoiceBar(
         handler.removeCallbacksAndMessages(null)
         status.setOnClickListener(null)
         status.isClickable = false
-        recognizer?.destroy(); recognizer = null
+        runCatching { recognizer?.stopListening() }
+        runCatching { recognizer?.cancel() }
+        runCatching { recognizer?.destroy() }
+        recognizer = null
+        listening = false
+        lastPartial = ""
         service.currentInputConnection?.finishComposingText()
         pulse.animate().cancel()
         pulse.scaleX = 1f; pulse.scaleY = 1f
@@ -682,12 +929,33 @@ class VoiceBar(
 
     companion object {
         private const val MicSize = 30
+        /** 分段会话最长持续时间，到时自动续开下一段 */
+        // Google 语音服务按 Integer 读取该值（传 Long 会被当成 0 并忽略分段会话）
+        private const val SegmentedSessionMillis: Int = 5 * 60_000
         private const val GoogleTtsPackage = "com.google.android.tts"
         private const val GoogleTtsRecognizer =
             "com.google.android.apps.speech.tts.googletts.service.GoogleTTSRecognitionService"
         private const val GooglePackage = "com.google.android.googlequicksearchbox"
         private const val GoogleRecognizer = "com.google.android.voicesearch.serviceapi.GoogleRecognitionService"
         private const val MaxPulse = 38f / MicSize
+
+        /** 进程内缓存：识别服务已安装的离线语言 */
+        private var offlineLangs: Set<String>? = null
+        private val probedLangs = mutableSetOf<String>()
+        private val downloadRequested = mutableSetOf<String>()
+
+        /** zh-CN / cmn-Hans-CN / zh 之类写法互相匹配 */
+        private fun langMatches(a: String, b: String): Boolean {
+            fun norm(x: String) = x.lowercase().replace('_', '-')
+                .replace("cmn-hans", "zh").replace("cmn", "zh").replace("-hans", "")
+            val x = norm(a); val y = norm(b)
+            if (x == y) return true
+            val xl = x.substringBefore('-'); val yl = y.substringBefore('-')
+            if (xl != yl) return false
+            // 只给了语言没给地区时视为匹配；都带地区则要求地区一致
+            val xr = x.substringAfter('-', ""); val yr = y.substringAfter('-', "")
+            return xr.isEmpty() || yr.isEmpty() || xr == yr
+        }
 
         fun isAvailable(ctx: Context): Boolean =
             SpeechRecognizer.isRecognitionAvailable(ctx) ||

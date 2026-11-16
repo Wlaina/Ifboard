@@ -72,6 +72,8 @@ public sealed class AppSettings
     public bool DisableAppForcedAscii { get; set; } = true;
     public bool AutoSyncDaily { get; set; } = true;
     public bool AutoCheckUpdate { get; set; } = true;
+    public bool ShowTaskbarImeIcon { get; set; } = true;
+    public bool ShowAsciiSwitchTip { get; set; } = false;
 }
 
 public sealed class RimePreferences

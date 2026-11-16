@@ -22,6 +22,13 @@ cp -r "$T"/assets/usr/share/* $A/usr/share/
 # 2. rime-ice shared data (overrides the plugin's default.yaml)
 R=$A/usr/share/rime-data
 cp -r "$RIME_ICE_DIR"/cn_dicts "$RIME_ICE_DIR"/en_dicts "$RIME_ICE_DIR"/lua "$RIME_ICE_DIR"/opencc $R/
+# rime-ice's opencc dir (emoji only) replaces the plugin's rime-data/opencc -> usr/share/opencc symlink,
+# so the 简→繁 switch (traditionalize, s2t.json) found no config and silently did nothing. Bring s2t back.
+if [ -f $A/usr/share/opencc/s2t.json ]; then
+  cp $A/usr/share/opencc/s2t.json $A/usr/share/opencc/STCharacters.ocd2 $A/usr/share/opencc/STPhrases.ocd2 $R/opencc/
+else
+  echo "WARNING: usr/share/opencc not staged yet (run the app build once, then stage again); 简→繁 will not work" >&2
+fi
 cp "$RIME_ICE_DIR"/*.schema.yaml "$RIME_ICE_DIR"/*.dict.yaml "$RIME_ICE_DIR"/symbols_*.yaml \
    "$RIME_ICE_DIR"/default.yaml "$R/"
 if [ -f "$RIME_ICE_DIR"/recipe.yaml ]; then cp "$RIME_ICE_DIR"/recipe.yaml "$R/"; fi

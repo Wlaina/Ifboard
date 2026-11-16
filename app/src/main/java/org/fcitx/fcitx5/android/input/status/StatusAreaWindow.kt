@@ -4,13 +4,17 @@
  */
 package org.fcitx.fcitx5.android.input.status
 
+import android.content.Context
 import android.os.Build
+import android.view.HapticFeedbackConstants
 import android.view.View
 import android.widget.PopupMenu
 import android.widget.Toast
 import androidx.core.text.buildSpannedString
 import androidx.core.text.color
 import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.ItemTouchHelper
+import androidx.recyclerview.widget.RecyclerView
 import kotlinx.coroutines.launch
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.core.Action
@@ -27,6 +31,7 @@ import org.fcitx.fcitx5.android.input.dependency.inputMethodService
 import org.fcitx.fcitx5.android.input.dependency.theme
 import org.fcitx.fcitx5.android.input.editorinfo.EditorInfoWindow
 import org.fcitx.fcitx5.android.input.keyboard.KeyboardWindow
+import org.fcitx.fcitx5.android.input.status.StatusAreaEntry.Android.Type.AutoSpace
 import org.fcitx.fcitx5.android.input.status.StatusAreaEntry.Android.Type.FloatingKeyboard
 import org.fcitx.fcitx5.android.input.status.StatusAreaEntry.Android.Type.InputMethod
 import org.fcitx.fcitx5.android.input.status.StatusAreaEntry.Android.Type.Keyboard
@@ -57,6 +62,13 @@ class StatusAreaWindow : InputWindow.ExtendedInputWindow<StatusAreaWindow>(),
 
     private val editorInfoInspector by AppPrefs.getInstance().internal.editorInfoInspector
     private val floatingKeyboard = AppPrefs.getInstance().keyboard.floatingKeyboard
+    private val autoSpaceAfterPeriod = AppPrefs.getInstance().keyboard.autoSpaceAfterPeriod
+
+    private val orderPrefs by lazy {
+        context.getSharedPreferences("ifboard_status_area", Context.MODE_PRIVATE)
+    }
+
+    private var lastActions: Array<Action> = arrayOf()
 
     private fun buildStaticEntries(): Array<StatusAreaEntry> = arrayOf(
         StatusAreaEntry.Android(
@@ -79,6 +91,12 @@ class StatusAreaWindow : InputWindow.ExtendedInputWindow<StatusAreaWindow>(),
             context.getString(R.string.reload_config),
             R.drawable.ic_baseline_sync_24,
             ReloadConfig
+        ),
+        StatusAreaEntry.Android(
+            "「.」后加空格",
+            R.drawable.ic_baseline_space_bar_24,
+            AutoSpace,
+            active = autoSpaceAfterPeriod.getValue()
         ),
         StatusAreaEntry.Android(
             context.getString(R.string.virtual_keyboard),
@@ -163,6 +181,16 @@ class StatusAreaWindow : InputWindow.ExtendedInputWindow<StatusAreaWindow>(),
                             floatingKeyboard.setValue(!floatingKeyboard.getValue())
                             windowManager.attachWindow(KeyboardWindow)
                         }
+                        AutoSpace -> {
+                            val on = !autoSpaceAfterPeriod.getValue()
+                            autoSpaceAfterPeriod.setValue(on)
+                            onStatusAreaUpdate(lastActions)
+                            Toast.makeText(
+                                service,
+                                if (on) "已开启：输入「.」后自动加空格" else "已关闭：输入「.」后自动加空格",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
                     }
                 }
             }
@@ -193,13 +221,68 @@ class StatusAreaWindow : InputWindow.ExtendedInputWindow<StatusAreaWindow>(),
             adapter = this@StatusAreaWindow.adapter
             setPadding(dp(11), dp(10), dp(11), dp(10) + bottomInset)
             clipToPadding = false
+            dragHelper.attachToRecyclerView(this)
         }
     }
 
+    // 长按任意格子拖动即可自由排序，松手后记住顺序
+    private val dragHelper by lazy {
+        ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(
+            ItemTouchHelper.UP or ItemTouchHelper.DOWN or ItemTouchHelper.LEFT or ItemTouchHelper.RIGHT, 0
+        ) {
+            override fun onMove(
+                recyclerView: RecyclerView,
+                viewHolder: RecyclerView.ViewHolder,
+                target: RecyclerView.ViewHolder
+            ): Boolean {
+                adapter.move(viewHolder.bindingAdapterPosition, target.bindingAdapterPosition)
+                return true
+            }
+
+            override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {}
+
+            override fun onSelectedChanged(viewHolder: RecyclerView.ViewHolder?, actionState: Int) {
+                super.onSelectedChanged(viewHolder, actionState)
+                if (actionState == ItemTouchHelper.ACTION_STATE_DRAG) {
+                    popupMenu?.dismiss()
+                    viewHolder?.itemView?.apply {
+                        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                        animate().scaleX(1.06f).scaleY(1.06f).setDuration(120).start()
+                    }
+                }
+            }
+
+            override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
+                super.clearView(recyclerView, viewHolder)
+                viewHolder.itemView.animate().scaleX(1f).scaleY(1f).setDuration(120).start()
+                saveOrder()
+            }
+        })
+    }
+
+    private fun saveOrder() {
+        orderPrefs.edit()
+            .putString(OrderKey, adapter.entries.joinToString(",") { it.orderKey })
+            .apply()
+    }
+
+    private fun applyOrder(entries: Array<StatusAreaEntry>): Array<StatusAreaEntry> {
+        val saved = orderPrefs.getString(OrderKey, null)?.split(',') ?: return entries
+        val rank = saved.withIndex().associate { it.value to it.index }
+        // 新出现的条目（例如新增功能）排在已保存顺序之后，保持原有相对位置
+        return entries.withIndex()
+            .sortedWith(compareBy({ rank[it.value.orderKey] ?: Int.MAX_VALUE }, { it.index }))
+            .map { it.value }
+            .toTypedArray()
+    }
+
     override fun onStatusAreaUpdate(actions: Array<Action>) {
-        adapter.entries = arrayOf(
-            *buildStaticEntries(),
-            *Array(actions.size) { StatusAreaEntry.fromAction(actions[it]) }
+        lastActions = actions
+        adapter.entries = applyOrder(
+            arrayOf(
+                *buildStaticEntries(),
+                *Array(actions.size) { StatusAreaEntry.fromAction(actions[it]) }
+            )
         )
     }
 
@@ -240,6 +323,10 @@ class StatusAreaWindow : InputWindow.ExtendedInputWindow<StatusAreaWindow>(),
                 onStatusAreaUpdate(data)
             }
         }
+    }
+
+    companion object {
+        private const val OrderKey = "order"
     }
 
     override fun onDetached() {

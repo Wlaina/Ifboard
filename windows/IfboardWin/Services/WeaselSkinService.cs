@@ -107,6 +107,11 @@ public static class WeaselSkinService
             {
                 settings.Density = my <= 5 ? LayoutDensity.Compact : LayoutDensity.Standard;
             }
+            else if (line.StartsWith("show_notifications:", StringComparison.OrdinalIgnoreCase))
+            {
+                var val = line["show_notifications:".Length..].Trim();
+                settings.ShowAsciiSwitchTip = string.Equals(val, "true", StringComparison.OrdinalIgnoreCase);
+            }
         }
     }
 
@@ -151,6 +156,10 @@ public static class WeaselSkinService
         sb.AppendLine($"  style/color_scheme_dark: {activeDark}");
         sb.AppendLine("  style/horizontal: true");
         sb.AppendLine("  style/inline_preedit: true");
+        sb.AppendLine($"  show_notifications: {(settings.ShowAsciiSwitchTip ? "true" : "false")}");
+        // 任务栏「中 / 英」由系统输入指示器显示（见 RimeProcessService.ApplyTaskbarImeIconState），
+        // 小狼毫自带托盘图标始终关闭，避免开启时出现两个重复的「中 / 英」图标
+        sb.AppendLine("  style/display_tray_icon: false");
         sb.AppendLine($"  style/font_point: {settings.FontPoint}");
         sb.AppendLine($"  style/label_font_point: {labelFont}");
         sb.AppendLine($"  style/comment_font_point: {labelFont}");

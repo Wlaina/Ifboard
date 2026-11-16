@@ -132,6 +132,10 @@ public partial class App : System.Windows.Application
         var settings = AppSettingsService.Load();
         WarmPaperPalette.ApplyToResources(Resources, settings.UiMode);
         AppSettingsService.SyncAutoStartRegistry(settings.AutoFollowSystemAccentTray);
+        // 默认不改动系统任务栏；仅当用户主动关闭任务栏图标时，启动时重新应用（防止 Windows 更新后复原）
+        if (!settings.ShowTaskbarImeIcon)
+            _ = Task.Run(() => RimeProcessService.ApplyTaskbarImeIconState(false));
+        EnsureImeIconCustomConfigOnStartup(settings);
 
         ConfigureJumpList();
         InitializeTrayIcon();
@@ -604,6 +608,9 @@ public partial class App : System.Windows.Application
         menu.Items.Add(MakeItem("切换至「Claude 陶土橙」皮肤", () => _ = SwitchWeaselThemeFromTrayAsync(ThemePresetKind.ClaudeTerracotta), isEnabled: !busy, isChecked: settings.WeaselTheme == ThemePresetKind.ClaudeTerracotta));
         menu.Items.Add(MakeItem("切换至「暖纸琥珀」皮肤", () => _ = SwitchWeaselThemeFromTrayAsync(ThemePresetKind.WarmAmber), isEnabled: !busy, isChecked: settings.WeaselTheme == ThemePresetKind.WarmAmber));
         menu.Items.Add(MakeSep());
+        menu.Items.Add(MakeItem("任务栏显示「中 / 英」图标", () => _ = ToggleTaskbarImeIconFromTrayAsync(), isEnabled: !busy, isChecked: settings.ShowTaskbarImeIcon));
+        menu.Items.Add(MakeItem("切换中英文弹出「中 / 英」浮动提示", () => _ = ToggleAsciiSwitchTipFromTrayAsync(), isEnabled: !busy, isChecked: settings.ShowAsciiSwitchTip));
+        menu.Items.Add(MakeSep());
         menu.Items.Add(MakeItem("重新部署小狼毫（/deploy）", () => _ = SafeDeployFromTrayAsync(), isEnabled: !busy));
         menu.Items.Add(MakeSep());
         menu.Items.Add(MakeItem("退出托盘", ExitApplication));
@@ -813,6 +820,124 @@ public partial class App : System.Windows.Application
         catch (Exception ex)
         {
             _trayIcon?.ShowBalloonTip(3500, "Ifboard 切换皮肤失败", ex.Message, WinForms.ToolTipIcon.Error);
+        }
+        finally
+        {
+            OperationGate.Release();
+            ScheduleHiddenWindowRelease();
+            ScheduleTrayTrim(aggressive: false, delayMs: 400);
+        }
+    }
+
+    private void EnsureImeIconCustomConfigOnStartup(AppSettings settings)
+    {
+        try
+        {
+            var customExists = File.Exists(Paths.WeaselCustomYaml);
+            var customText = customExists ? File.ReadAllText(Paths.WeaselCustomYaml, Encoding.UTF8) : string.Empty;
+            var wantedTip = settings.ShowAsciiSwitchTip ? "true" : "false";
+            var customOk = customExists &&
+                           customText.Contains($"show_notifications: {wantedTip}", StringComparison.OrdinalIgnoreCase) &&
+                           customText.Contains("style/display_tray_icon: false", StringComparison.OrdinalIgnoreCase);
+
+            // 仅检查 custom 不够：若上次部署未完成，build\weasel.yaml 仍是旧值，必须重新 /deploy
+            var buildYaml = Path.Combine(Paths.RimeUserDir, "build", "weasel.yaml");
+            var buildOk = File.Exists(buildYaml) &&
+                          File.ReadLines(buildYaml, Encoding.UTF8)
+                              .Any(l => l.Trim().Equals($"show_notifications: {wantedTip}", StringComparison.OrdinalIgnoreCase));
+
+            if (customOk && buildOk)
+                return;
+
+            _ = Task.Run(async () =>
+            {
+                if (!await OperationGate.WaitAsync(0)) return;
+                try
+                {
+                    if (!customOk)
+                        WeaselSkinService.WriteWeaselCustomYaml(settings);
+                    await RimeProcessService.DeployAsync();
+                }
+                catch
+                {
+                    // 启动自愈静默容错
+                }
+                finally
+                {
+                    OperationGate.Release();
+                    ScheduleTrayTrim(aggressive: false, delayMs: 400);
+                }
+            });
+        }
+        catch
+        {
+            // 启动自愈检查异常静默忽略
+        }
+    }
+
+    private async Task ToggleTaskbarImeIconFromTrayAsync()
+    {
+        if (!await OperationGate.WaitAsync(0))
+        {
+            _trayIcon?.ShowBalloonTip(2500, "Ifboard", "当前已有部署或同步任务正在执行，请稍后再试。", WinForms.ToolTipIcon.Info);
+            return;
+        }
+
+        try
+        {
+            var settings = AppSettingsService.Load();
+            settings.ShowTaskbarImeIcon = !settings.ShowTaskbarImeIcon;
+            AppSettingsService.Save(settings);
+            var showTaskbarIcon = settings.ShowTaskbarImeIcon;
+            await Task.Run(() => RimeProcessService.ApplyTaskbarImeIconState(showTaskbarIcon));
+            WeaselSkinService.WriteWeaselCustomYaml(settings);
+            await RimeProcessService.DeployAsync();
+            await Dispatcher.InvokeAsync(() => _mainWindow?.RefreshImeIconChecksFromSettings(settings));
+            _trayIcon?.ShowBalloonTip(
+                2500,
+                "Ifboard 任务栏「中 / 英」图标设置已更新",
+                settings.ShowTaskbarImeIcon ? "已开启任务栏右下角「中 / 英」状态图标。" : "已关闭任务栏右下角「中 / 英」状态图标。",
+                WinForms.ToolTipIcon.Info
+            );
+        }
+        catch (Exception ex)
+        {
+            _trayIcon?.ShowBalloonTip(3500, "Ifboard 更新图标设置失败", ex.Message, WinForms.ToolTipIcon.Error);
+        }
+        finally
+        {
+            OperationGate.Release();
+            ScheduleHiddenWindowRelease();
+            ScheduleTrayTrim(aggressive: false, delayMs: 400);
+        }
+    }
+
+    private async Task ToggleAsciiSwitchTipFromTrayAsync()
+    {
+        if (!await OperationGate.WaitAsync(0))
+        {
+            _trayIcon?.ShowBalloonTip(2500, "Ifboard", "当前已有部署或同步任务正在执行，请稍后再试。", WinForms.ToolTipIcon.Info);
+            return;
+        }
+
+        try
+        {
+            var settings = AppSettingsService.Load();
+            settings.ShowAsciiSwitchTip = !settings.ShowAsciiSwitchTip;
+            AppSettingsService.Save(settings);
+            WeaselSkinService.WriteWeaselCustomYaml(settings);
+            await RimeProcessService.DeployAsync();
+            await Dispatcher.InvokeAsync(() => _mainWindow?.RefreshImeIconChecksFromSettings(settings));
+            _trayIcon?.ShowBalloonTip(
+                2500,
+                "Ifboard 切换「中 / 英」浮动提示设置已更新",
+                settings.ShowAsciiSwitchTip ? "已开启切换中英文时的浮动「中 / 英」提示图标。" : "已关闭切换中英文时的浮动「中 / 英」提示图标。",
+                WinForms.ToolTipIcon.Info
+            );
+        }
+        catch (Exception ex)
+        {
+            _trayIcon?.ShowBalloonTip(3500, "Ifboard 更新浮动提示设置失败", ex.Message, WinForms.ToolTipIcon.Error);
         }
         finally
         {

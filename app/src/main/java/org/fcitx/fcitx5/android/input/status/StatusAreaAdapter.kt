@@ -17,8 +17,16 @@ abstract class StatusAreaAdapter : RecyclerView.Adapter<StatusAreaAdapter.Holder
         @SuppressLint("NotifyDataSetChanged")
         set(value) {
             field = value
-            notifyDataSetChanged()
+            if (!suppressNotify) notifyDataSetChanged()
         }
+
+    private fun silentEntries(value: Array<StatusAreaEntry>) {
+        suppressNotify = true
+        entries = value
+        suppressNotify = false
+    }
+
+    private var suppressNotify = false
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
         return Holder(StatusAreaEntryUi(parent.context, theme))
@@ -28,11 +36,22 @@ abstract class StatusAreaAdapter : RecyclerView.Adapter<StatusAreaAdapter.Holder
         val entry = entries[position]
         holder.ui.setEntry(entry)
         holder.ui.root.setOnClickListener {
-            onItemClick(it, entry)
+            // 拖动换位后 position 会变，按当前位置取条目
+            val pos = holder.bindingAdapterPosition
+            if (pos != RecyclerView.NO_POSITION) onItemClick(it, entries[pos])
         }
     }
 
     abstract val theme: Theme
+
+    /** 拖动排序时交换位置，不整表刷新，以免打断拖动 */
+    fun move(from: Int, to: Int) {
+        if (from == to || from !in entries.indices || to !in entries.indices) return
+        val list = entries.toMutableList()
+        list.add(to, list.removeAt(from))
+        silentEntries(list.toTypedArray())
+        notifyItemMoved(from, to)
+    }
 
     override fun getItemCount() = entries.size
 

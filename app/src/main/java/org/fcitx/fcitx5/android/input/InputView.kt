@@ -163,7 +163,7 @@ class InputView(
         }
     }
 
-    val voiceBar by lazy {
+    private val voiceBarLazy = lazy {
         org.fcitx.fcitx5.android.input.inline.VoiceBar(themedContext, theme, service) {
             val ime = fcitx.runImmediately { inputMethodEntryCached }
             if (ime.uniqueName.startsWith("keyboard-")) "en-US" else "zh-CN"
@@ -174,6 +174,12 @@ class InputView(
                 kawaiiBar.view.animate().alpha(if (on) 0f else 1f).setDuration(150).start()
             }
         }
+    }
+    val voiceBar by voiceBarLazy
+
+    /** 键盘收起 / 销毁时彻底停止语音识别，释放麦克风（未创建过语音条时不触发懒加载） */
+    fun stopInlineVoice() {
+        if (voiceBarLazy.isInitialized()) voiceBar.stop()
     }
     private val horizontalCandidate = HorizontalCandidateComponent()
     private val keyboardWindow = KeyboardWindow()
@@ -893,6 +899,8 @@ class InputView(
             }
             is FcitxEvent.IMChangeEvent -> {
                 broadcaster.onImeUpdate(it.data)
+                // 语音输入中切换键盘语言：按新语言重启识别
+                if (voiceBarLazy.isInitialized() && voiceBar.active) post { voiceBar.onLanguageChanged() }
             }
             is FcitxEvent.StatusAreaEvent -> {
                 punctuation.updatePunctuationMapping(it.data.actions)

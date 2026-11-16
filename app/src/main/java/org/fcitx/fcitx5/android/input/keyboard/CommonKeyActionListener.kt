@@ -164,6 +164,12 @@ class CommonKeyActionListener :
                         Reset -> {}
                     }
                 }
+                is KeyAction.DeleteAllAction -> {
+                    backspaceSwipeState = Stopped
+                    TypoCorrector.clear()
+                    service.postFcitxJob { reset() }
+                    service.deleteAllText()
+                }
                 is DeleteSelectionAction -> {
                     when (backspaceSwipeState) {
                         Stopped -> {}
@@ -199,6 +205,11 @@ class CommonKeyActionListener :
                         }
                         SpaceLongPressBehavior.ShowPicker -> showInputMethodPicker()
                     }
+                }
+                is KeyAction.FloatingKeyboardToggleAction -> ContextCompat.getMainExecutor(service).execute {
+                    val pref = org.fcitx.fcitx5.android.data.prefs.AppPrefs.getInstance().keyboard.floatingKeyboard
+                    pref.setValue(!pref.getValue())
+                    windowManager.attachWindow(KeyboardWindow)
                 }
                 is KeyAction.UndoAction -> service.sendCombinationKeyEvents(KeyEvent.KEYCODE_Z, ctrl = true)
                 is KeyAction.RedoAction -> service.sendCombinationKeyEvents(KeyEvent.KEYCODE_Z, ctrl = true, shift = true)

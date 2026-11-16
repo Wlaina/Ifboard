@@ -67,6 +67,10 @@ open class CustomGestureView(ctx: Context) : FrameLayout(ctx) {
     private var repeatJob: Job? = null
 
     var swipeEnabled = false
+
+    /** 最近一次 Up 手势事件是否来自 ACTION_CANCEL */
+    var lastGestureCancelled = false
+        private set
     var swipeRepeatEnabled = false
     var swipeThresholdX = 24f
     var swipeThresholdY = 24f
@@ -179,6 +183,7 @@ open class CustomGestureView(ctx: Context) : FrameLayout(ctx) {
                 }
             }
             MotionEvent.ACTION_UP -> {
+                lastGestureCancelled = false
                 isPressed = false
                 InputFeedbacks.hapticFeedback(this, longPress = true, keyUp = true)
                 dispatchGestureEvent(GestureType.Up, event.x, event.y)
@@ -231,6 +236,8 @@ open class CustomGestureView(ctx: Context) : FrameLayout(ctx) {
                 return true
             }
             MotionEvent.ACTION_CANCEL -> {
+                // 系统取消的触摸也以 Up 分发；带破坏性的手势（如上滑清空）据此跳过
+                lastGestureCancelled = true
                 isPressed = false
                 dispatchGestureEvent(GestureType.Up, event.x, event.y)
                 resetState()

@@ -15,6 +15,7 @@ Warm Paper · Liquid Glass 风格的 Windows 小狼毫（Weasel `0.17.4`）一�
 - **万象语法模型与控制中心对齐**：
   - 对接 `amzxyz/rime-wanxiang-data` 官方 `LTS` Release，支持无限超时保护、后台托盘提醒与自动断点续传（GitHub 连不上时自动回退 CNB 国内镜像），并通过 `Rime::Grammar/` 头与 SHA-256 校验后热替换部署。
   - 控制中心与 Android 端能力对齐，支持 `librime` 整句纠错开关（`translator/enable_correction`）与仅匹配 Windows `.exe` 安装包的 Release 检查更新。
+  - 新增**任务栏右下角「中 / 英」状态图标**（`HKCU\Software\Microsoft\CTF\LangBar` + COM `ITfLangBarMgr` + `style/display_tray_icon`）与**切换中英文浮动「中 / 英」提示图标**（`show_notifications`）双开关，支持在「输入与方案」、「外观与皮肤」及系统托盘菜单随时切换，并在启动时自动守护状态以抵御 Windows 系统更新重置。
 
 ## 目录结构
 
@@ -51,4 +52,4 @@ dotnet publish .\IfboardWin\IfboardWin.csproj -c Release -r win-x64 --self-conta
 & "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" .\installer\IfboardSetup.iss
 ```
 
-输出产物位于 `dist\Ifboard-Windows-Setup-1.2.7.exe`。
+输出产物位于 `dist\Ifboard-Windows-Setup-1.2.9.exe`。

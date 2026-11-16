@@ -264,6 +264,8 @@ class KeyboardWindow : InputWindow.SimpleInputWindow<KeyboardWindow>(), Essentia
         private var downY = 0f
         private var previewing: KeyView? = null
         private val threshold = ctx.resources.displayMetrics.density * 12
+        /** 按住「?123」超过这个时长再松手（没滑动、没用另一只手）也自动回到字母键盘 */
+        private val HoldReturnMillis = 450L
 
         // Gboard: a thick rounded line follows the finger from where "?123" was pressed
         private val linePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
@@ -317,15 +319,78 @@ class KeyboardWindow : InputWindow.SimpleInputWindow<KeyboardWindow>(), Essentia
             v?.let { it.isPressed = true; kb?.showSlidePreview(it) }
         }
 
+        // 按住「?123」时另一根手指点击符号键盘：单独转发给键盘的那根手指
+        private var slidePointerId = -1
+        private var chordPointerId = -1
+        private var chordDownTime = 0L
+        private var chorded = false
+        private var slideDownTime = 0L
+
+        private fun rawXOf(ev: android.view.MotionEvent, i: Int): Float {
+            getLocationOnScreen(loc); return ev.getX(i) + loc[0]
+        }
+
+        private fun rawYOf(ev: android.view.MotionEvent, i: Int): Float {
+            getLocationOnScreen(loc); return ev.getY(i) + loc[1]
+        }
+
+        /** 用第二根手指的坐标合成一条单指事件交给键盘（屏幕坐标保留在 raw 里，键盘按 rawX/rawY 命中按键） */
+        private fun forwardChord(ev: android.view.MotionEvent, index: Int, action: Int) {
+            getLocationOnScreen(loc)
+            val synth = android.view.MotionEvent.obtain(
+                chordDownTime, ev.eventTime, action,
+                ev.getX(index) + loc[0], ev.getY(index) + loc[1], ev.metaState
+            )
+            synth.offsetLocation(-loc[0].toFloat(), -loc[1].toFloat())
+            super.dispatchTouchEvent(synth)
+            synth.recycle()
+        }
+
+        private fun endChordIfAny(ev: android.view.MotionEvent, commit: Boolean) {
+            if (chordPointerId < 0) return
+            val i = ev.findPointerIndex(chordPointerId)
+            if (i >= 0) forwardChord(ev, i, if (commit) android.view.MotionEvent.ACTION_UP else android.view.MotionEvent.ACTION_CANCEL)
+            chordPointerId = -1
+        }
+
+        private fun finishSlide(ev: android.view.MotionEvent, released: Boolean) {
+            sliding = false
+            fadeLine()
+            val kb = currentKeyboard
+            setPreview(kb, null)
+            val i = ev.findPointerIndex(slidePointerId).coerceAtLeast(0)
+            if (moved) {
+                // 滑动选符号：松手处是符号键就上屏；无论是否命中（包括滑出键盘范围、被系统取消），都回到字母键盘
+                if (released) {
+                    val hit = kb?.findKeyAt(rawXOf(ev, i), rawYOf(ev, i))
+                    val act = hit?.second
+                    if (act is KeyAction.CommitAction) {
+                        org.fcitx.fcitx5.android.data.InputFeedbacks.hapticFeedback(hit.first)
+                        kb.dispatchSlideAction(act)
+                    }
+                }
+                switchLayout(TextKeyboard.Name, remember = false)
+            } else if (released && (chorded || ev.eventTime - slideDownTime > HoldReturnMillis)) {
+                // 按住「?123」期间用另一只手输入了符号（或明显是长按），松手自动回到字母键盘
+                switchLayout(TextKeyboard.Name, remember = false)
+            }
+            slidePointerId = -1
+            chorded = false
+        }
+
         override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
             when (ev.actionMasked) {
                 android.view.MotionEvent.ACTION_DOWN -> {
+                    chordPointerId = -1
                     val kb = currentKeyboard
                     val hit = if (kb is TextKeyboard) kb.findKeyAt(ev.rawX, ev.rawY) else null
                     val act = hit?.second
                     if (act is KeyAction.LayoutSwitchAction && act.act == GboardSymbolKeyboard.Page1Name) {
                         sliding = true
                         moved = false
+                        chorded = false
+                        slidePointerId = ev.getPointerId(0)
+                        slideDownTime = ev.eventTime
                         downX = ev.rawX
                         downY = ev.rawY
                         getLocationOnScreen(loc)
@@ -336,31 +401,57 @@ class KeyboardWindow : InputWindow.SimpleInputWindow<KeyboardWindow>(), Essentia
                         return true
                     }
                 }
-                android.view.MotionEvent.ACTION_MOVE -> if (sliding) {
-                    if (!moved && kotlin.math.hypot(ev.rawX - downX, ev.rawY - downY) > threshold) moved = true
-                    if (moved) {
-                        lineTo(ev.rawX, ev.rawY)
-                        val kb = currentKeyboard
-                        val hit = kb?.findKeyAt(ev.rawX, ev.rawY)
-                        setPreview(kb, hit?.takeIf { it.second is KeyAction.CommitAction }?.first)
+                android.view.MotionEvent.ACTION_POINTER_DOWN -> if (sliding) {
+                    // 已经在滑动选符号时不接第二根手指，避免两种操作冲突；同一时间只转发一根
+                    if (!moved && chordPointerId < 0) {
+                        val i = ev.actionIndex
+                        chordPointerId = ev.getPointerId(i)
+                        chordDownTime = ev.eventTime
+                        chorded = true
+                        forwardChord(ev, i, android.view.MotionEvent.ACTION_DOWN)
                     }
                     return true
                 }
-                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> if (sliding) {
-                    sliding = false
-                    fadeLine()
-                    val kb = currentKeyboard
-                    setPreview(kb, null)
-                    if (moved && ev.actionMasked == android.view.MotionEvent.ACTION_UP) {
-                        val hit = kb?.findKeyAt(ev.rawX, ev.rawY)
-                        val act = hit?.second
-                        if (act is KeyAction.CommitAction) {
-                            org.fcitx.fcitx5.android.data.InputFeedbacks.hapticFeedback(hit.first)
-                            kb.dispatchSlideAction(act)
-                            switchLayout(TextKeyboard.Name, remember = false)
+                android.view.MotionEvent.ACTION_MOVE -> if (sliding) {
+                    if (chordPointerId >= 0) {
+                        val ci = ev.findPointerIndex(chordPointerId)
+                        if (ci >= 0) forwardChord(ev, ci, android.view.MotionEvent.ACTION_MOVE)
+                    }
+                    val si = ev.findPointerIndex(slidePointerId)
+                    if (si >= 0 && !chorded) {
+                        val rx = rawXOf(ev, si)
+                        val ry = rawYOf(ev, si)
+                        if (!moved && kotlin.math.hypot(rx - downX, ry - downY) > threshold) moved = true
+                        if (moved) {
+                            lineTo(rx, ry)
+                            val kb = currentKeyboard
+                            val hit = kb?.findKeyAt(rx, ry)
+                            setPreview(kb, hit?.takeIf { it.second is KeyAction.CommitAction }?.first)
                         }
                     }
                     return true
+                }
+                android.view.MotionEvent.ACTION_POINTER_UP -> if (sliding) {
+                    when (ev.getPointerId(ev.actionIndex)) {
+                        chordPointerId -> {
+                            forwardChord(ev, ev.actionIndex, android.view.MotionEvent.ACTION_UP)
+                            chordPointerId = -1
+                        }
+                        slidePointerId -> {
+                            // 先松开了「?123」：手里那个符号照常上屏，然后回到字母键盘
+                            endChordIfAny(ev, commit = true)
+                            finishSlide(ev, released = true)
+                        }
+                    }
+                    return true
+                }
+                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                    val cancel = ev.actionMasked == android.view.MotionEvent.ACTION_CANCEL
+                    if (sliding) {
+                        endChordIfAny(ev, commit = !cancel)
+                        finishSlide(ev, released = !cancel)
+                        return true
+                    }
                 }
                 else -> if (sliding) return true
             }

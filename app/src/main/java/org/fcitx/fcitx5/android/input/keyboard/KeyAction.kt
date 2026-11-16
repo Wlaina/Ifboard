@@ -54,7 +54,13 @@ sealed class KeyAction {
 
     data class DeleteSelectionAction(val totalCnt: Int = 0) : KeyAction()
 
+    /** 删除键上滑：清空正在输入的编码与输入框全部文字 */
+    data object DeleteAllAction : KeyAction()
+
     data class PickerSwitchAction(val key: PickerWindow.Key? = null) : KeyAction()
 
     data object SpaceLongPressAction : KeyAction()
+
+    /** Ifboard: 长按回车 → 悬浮键盘 / 停靠键盘切换 */
+    data object FloatingKeyboardToggleAction : KeyAction()
 }

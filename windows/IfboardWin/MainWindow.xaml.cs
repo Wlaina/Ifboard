@@ -44,6 +44,29 @@ public partial class MainWindow : Window
         LoadAllStateIntoUi();
     }
 
+    public void RefreshImeIconChecksFromSettings(AppSettings? external = null)
+    {
+        if (external != null)
+        {
+            _settings.ShowTaskbarImeIcon = external.ShowTaskbarImeIcon;
+            _settings.ShowAsciiSwitchTip = external.ShowAsciiSwitchTip;
+        }
+
+        var prev = _isBindingUi;
+        _isBindingUi = true;
+        try
+        {
+            ShowTaskbarImeIconCheck.IsChecked = _settings.ShowTaskbarImeIcon;
+            ShowTaskbarImeIconSkinCheck.IsChecked = _settings.ShowTaskbarImeIcon;
+            ShowAsciiSwitchTipCheck.IsChecked = _settings.ShowAsciiSwitchTip;
+            ShowAsciiSwitchTipSkinCheck.IsChecked = _settings.ShowAsciiSwitchTip;
+        }
+        finally
+        {
+            _isBindingUi = prev;
+        }
+    }
+
     public void RefreshSystemThemePreview()
     {
         ApplyNativeTitleBarTheme();
@@ -123,6 +146,7 @@ public partial class MainWindow : Window
 
             AutoAccentTrayCheck.IsChecked = _settings.AutoFollowSystemAccentTray;
             DisableForcedAsciiCheck.IsChecked = _settings.DisableAppForcedAscii;
+            RefreshImeIconChecksFromSettings(_settings);
 
             RefreshLocalGrammarCard();
             UpdateSkinPreview();
@@ -221,6 +245,10 @@ public partial class MainWindow : Window
         DeleteGrammarBtn.IsEnabled = enabled && (GrammarModelService.IsLocalModelValid() || GrammarModelService.GetPendingPartSizeBytes() > 0);
         ApplyRimeBtn.IsEnabled = enabled;
         ApplySkinBtn.IsEnabled = enabled;
+        ShowTaskbarImeIconCheck.IsEnabled = enabled;
+        ShowAsciiSwitchTipCheck.IsEnabled = enabled;
+        ShowTaskbarImeIconSkinCheck.IsEnabled = enabled;
+        ShowAsciiSwitchTipSkinCheck.IsEnabled = enabled;
         RemoveMsPinyinBtn.IsEnabled = enabled;
         RestartWeaselBtn.IsEnabled = enabled;
         CheckAppUpdateBtn.IsEnabled = enabled;
@@ -237,8 +265,17 @@ public partial class MainWindow : Window
         {
             try
             {
+                // 输入方案页有未保存的改动（例如候选词个数）时一并写入，避免「改了没生效」
+                var appliedPending = InputDirtyBadge.Visibility == Visibility.Visible;
+                if (appliedPending)
+                {
+                    _rimePrefs = CollectRimePrefsFromUi();
+                    RimeConfigService.ApplyPreferences(_rimePrefs);
+                }
                 SetStatus("正在重新部署小狼毫引擎（WeaselDeployer /deploy）...", isBusy: true, progressPercent: -1);
                 var code = await RimeProcessService.DeployAsync();
+                if (code == 0 && appliedPending)
+                    InputDirtyBadge.Visibility = Visibility.Collapsed;
                 SetStatus(
                     code == 0 ? "小狼毫部署完成，配置与词库已热重载生效。" : $"小狼毫部署结束（返回码 {code}）。",
                     isError: code != 0,
@@ -634,6 +671,53 @@ public partial class MainWindow : Window
     {
         if (_isBindingUi || !IsLoaded) return;
         InputDirtyBadge.Visibility = Visibility.Visible;
+    }
+
+    private async void ImeIconSetting_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isBindingUi || !IsLoaded) return;
+
+        if (_isOperationBusy || App.OperationGate.CurrentCount == 0)
+        {
+            RefreshImeIconChecksFromSettings(_settings);
+            SetStatus("当前已有部署或同步任务正在运行，请稍后再试。", isBusy: true);
+            return;
+        }
+
+        if (ReferenceEquals(sender, ShowTaskbarImeIconCheck))
+            _settings.ShowTaskbarImeIcon = ShowTaskbarImeIconCheck.IsChecked == true;
+        else if (ReferenceEquals(sender, ShowTaskbarImeIconSkinCheck))
+            _settings.ShowTaskbarImeIcon = ShowTaskbarImeIconSkinCheck.IsChecked == true;
+        else if (ReferenceEquals(sender, ShowAsciiSwitchTipCheck))
+            _settings.ShowAsciiSwitchTip = ShowAsciiSwitchTipCheck.IsChecked == true;
+        else if (ReferenceEquals(sender, ShowAsciiSwitchTipSkinCheck))
+            _settings.ShowAsciiSwitchTip = ShowAsciiSwitchTipSkinCheck.IsChecked == true;
+
+        RefreshImeIconChecksFromSettings(_settings);
+
+        await RunExclusiveAsync(async () =>
+        {
+            try
+            {
+                SetStatus("正在更新「中 / 英」图标显示设置并部署生效...", isBusy: true, progressPercent: -1);
+                AppSettingsService.Save(_settings);
+                var showTaskbarIcon = _settings.ShowTaskbarImeIcon;
+                await Task.Run(() => RimeProcessService.ApplyTaskbarImeIconState(showTaskbarIcon));
+                WeaselSkinService.WriteWeaselCustomYaml(_settings);
+                var code = await RimeProcessService.DeployAsync();
+                SetStatus(
+                    code == 0
+                        ? $"已更新「中 / 英」图标设置（任务栏：{(_settings.ShowTaskbarImeIcon ? "开启" : "关闭")} / 切换提示：{(_settings.ShowAsciiSwitchTip ? "开启" : "关闭")}）"
+                        : $"图标设置已保存，小狼毫部署返回码 {code}。",
+                    isError: code != 0,
+                    detail: DateTime.Now.ToString("HH:mm:ss")
+                );
+            }
+            catch (Exception ex)
+            {
+                SetStatus($"更新「中 / 英」图标设置失败：{ex.Message}", isError: true);
+            }
+        });
     }
 
     private async void ApplyRimeConfig_Click(object sender, RoutedEventArgs e)

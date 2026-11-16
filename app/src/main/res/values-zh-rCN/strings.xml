@@ -338,6 +338,7 @@
     <string name="gb_auto_correct">英文自动纠错</string>
     <string name="gb_auto_capitalize">英文自动大写</string>
     <string name="gb_double_space_period">英文双击空格键插入句号</string>
+    <string name="auto_space_after_period">输入「.」后自动加空格</string>
     <string name="ifb_glass_effect">液态玻璃效果</string>
     <string name="ifb_glass_effect_summary">仅在系统支持跨窗口模糊（Android 12+ 且 ROM 开启该特性）时，键盘背景才会呈现半透明高斯模糊液态玻璃；不支持的系统保持不透明背景并保留弹窗磨砂。关闭后更省电</string>
     <string name="clear_all_images">清空所有图片</string>
