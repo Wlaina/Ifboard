@@ -353,6 +353,18 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
                         }
                         return@event
                     }
+                    // Ifboard: 「.」「,」若按模拟按键直接发给应用会绕过自动空格，开启时改为提交文本
+                    if (autoSpaceAfterPeriod && (it.unicode == '.'.code || it.unicode == ','.code) &&
+                        it.states.metaState == 0
+                    ) {
+                        if (!it.up) commitText(Character.toString(it.unicode))
+                        return@event
+                    }
+                    // 自动空格之后的空格同理，交给 commitText 吞掉重复空格
+                    if (autoSpaceCursor >= 0 && it.unicode == ' '.code && it.states.metaState == 0) {
+                        if (!it.up) commitText(" ")
+                        return@event
+                    }
                     // simulate key event
                     val keyCode = it.sym.keyCode
                     if (keyCode != KeyEvent.KEYCODE_UNKNOWN) {
@@ -492,7 +504,7 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         currentInputConnection.setSelection(target, target)
     }
 
-    /** Ifboard: 自动补在「.」后面的空格所在的光标位置（-1 表示没有） */
+    /** Ifboard: 自动补在「.」「,」后面的空格所在的光标位置（-1 表示没有） */
     private var autoSpaceCursor = -1
     private val autoSpaceAfterPeriod by prefs.keyboard.autoSpaceAfterPeriod
 
@@ -512,27 +524,45 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     }
 
     /**
-     * 「输入 . 后自动加空格」：返回实际要提交的文本，null 表示这次提交被吞掉
+     * 「输入 . 或 , 后自动加空格」：返回实际要提交的文本，null 表示这次提交被吞掉
      * （紧跟自动空格之后用户又按了空格）。
+     * 兼容「单词.」「候选.」这类和句点一起提交的情况。
      */
     private fun applyAutoSpaceAfterPeriod(text: String, ic: InputConnection): String? {
         val prevAuto = autoSpaceCursor
         autoSpaceCursor = -1
-        if (!autoSpaceAfterPeriod || composing.isNotEmpty()) return text
+        if (!autoSpaceAfterPeriod || text.isEmpty()) return text
         val cursorNow = selection.latest.start
-        val justAutoSpaced = prevAuto >= 0 && prevAuto == cursorNow && selection.latest.end == cursorNow
-        if (text == " " && justAutoSpaced) return null
-        if (text != "." || !editorAllowsAutoSpace()) return text
-        val before = ic.getTextBeforeCursor(2, 0)?.toString().orEmpty()
-        if (justAutoSpaced && before.endsWith(". ")) {
-            // 连续输入「...」：把上一个自动空格挪到最后一个句点后面
-            ic.deleteSurroundingText(1, 0)
-            selection.predict(cursorNow - 1)
-        } else if (before.lastOrNull()?.isDigit() == true) {
-            return text // 小数点 3.14
+        val justAutoSpaced = composing.isEmpty() && prevAuto >= 0 && prevAuto == cursorNow &&
+            selection.latest.end == cursorNow
+        if (justAutoSpaced) {
+            if (text == " ") return null
+            // 自动空格后紧接标点（如「.」「,」「)」）：先收回那个空格，标点贴着前文
+            if (text[0] in AutoSpaceGluePunct && ic.getTextBeforeCursor(1, 0)?.toString() == " ") {
+                ic.deleteSurroundingText(1, 0)
+                selection.predict(cursorNow - 1)
+            }
         }
-        autoSpaceCursor = selection.latest.start + 2
-        return ". "
+        val mark = text.last()
+        if ((mark != '.' && mark != ',') || !editorAllowsAutoSpace()) return text
+        // 句点前两个字符：取「输入框里组字区之前的文字 + 本次提交」的末尾
+        val beforeStart = if (composing.isEmpty()) selection.latest.start else composing.start
+        val composingLen = (selection.latest.start - beforeStart).coerceAtLeast(0)
+        val existing = ic.getTextBeforeCursor(2 + composingLen, 0)
+            ?.toString().orEmpty().dropLast(composingLen).takeLast(2)
+        val tail = (existing + text.dropLast(1)).takeLast(2)
+        val prev = tail.lastOrNull()
+        val prev2 = if (tail.length >= 2) tail[0] else null
+        // 小数点 / 千分位（3.14、1,000）、行首或空格后（.net）不加；连续标点（,, / ...）交给收回空格的逻辑
+        if (prev == null || prev.isDigit() || prev.isWhitespace()) return text
+        // 句点前只有单个字母（e.g. / U.S. / J. K.）不加，免得缩写被拆开；逗号不受此限
+        if (mark == '.' && prev.isLetter() && prev.code < 0x80 && (prev2 == null || !prev2.isLetter())) return text
+        val start = when {
+            composing.isNotEmpty() -> composing.start
+            else -> minOf(selection.latest.start, selection.latest.end)
+        }
+        autoSpaceCursor = start + text.length + 1
+        return "$text "
     }
 
     fun commitText(text: String, cursor: Int = -1) {
@@ -785,7 +815,11 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
                 }
                 return
             }
-            view?.keyboardView?.getLocationInWindow(inputViewLocation)
+            view?.keyboardView?.let { kv ->
+                kv.getLocationInWindow(inputViewLocation)
+                // 悬浮 ⇄ 停靠过渡动画期间键盘带着平移量：按最终位置算，免得应用区域被临时压缩露出黑底
+                inputViewLocation[1] -= kv.translationY.toInt()
+            }
             outInsets.apply {
                 contentTopInsets = inputViewLocation[1]
                 visibleTopInsets = inputViewLocation[1]
@@ -1318,6 +1352,7 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
 
     @Suppress("ConstPropertyName")
     companion object {
+        private const val AutoSpaceGluePunct = ".,;:!?)]}'\""
         private const val DeleteAllChunk = 100_000
         const val DeleteSurroundingFlag = "org.fcitx.fcitx5.android.DELETE_SURROUNDING"
     }

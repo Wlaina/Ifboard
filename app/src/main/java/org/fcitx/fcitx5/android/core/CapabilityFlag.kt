@@ -114,13 +114,13 @@ value class CapabilityFlags constructor(val flags: ULong) {
                         (it and InputType.TYPE_MASK_FLAGS).run {
                             // Ifboard (Gboard behavior): AUTO_COMPLETE (search boxes) and NO_SUGGESTIONS in ordinary
                             // text fields used to switch English word completion off, which made it look broken in
-                            // most apps. Only honor NO_SUGGESTIONS for addresses / usernames.
+                            // most apps. Browser address bars (URI + NO_SUGGESTIONS, e.g. Chrome 0x80011) and
+                            // search / filter boxes are where English is typed most, so word hints stay on there too
+                            // (autocorrect is still skipped by EnglishAssist). Only e-mail fields honor NO_SUGGESTIONS.
                             val variation = it and InputType.TYPE_MASK_VARIATION
                             if (hasFlag(InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS) && variation in setOf(
-                                    InputType.TYPE_TEXT_VARIATION_URI,
                                     InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
-                                    InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,
-                                    InputType.TYPE_TEXT_VARIATION_FILTER
+                                    InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS
                                 )
                             ) {
                                 flags += CapabilityFlag.NoSpellCheck

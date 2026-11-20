@@ -93,6 +93,9 @@ public sealed class RimePreferences
     public bool TabPageFlip { get; set; } = true;
     public bool GrammarEnabled { get; set; } = true;
     public bool EnableCorrection { get; set; } = true;
+
+    /// <summary>英文模式（ascii_mode）下输入「.」「,」后，在下一个单词前自动补空格</summary>
+    public bool AsciiAutoSpace { get; set; }
 }
 
 public sealed record WeaselColorSchemeSpec(

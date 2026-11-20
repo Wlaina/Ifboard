@@ -93,7 +93,7 @@ class StatusAreaWindow : InputWindow.ExtendedInputWindow<StatusAreaWindow>(),
             ReloadConfig
         ),
         StatusAreaEntry.Android(
-            "「.」后加空格",
+            "「. ,」后加空格",
             R.drawable.ic_baseline_space_bar_24,
             AutoSpace,
             active = autoSpaceAfterPeriod.getValue()
@@ -187,7 +187,7 @@ class StatusAreaWindow : InputWindow.ExtendedInputWindow<StatusAreaWindow>(),
                             onStatusAreaUpdate(lastActions)
                             Toast.makeText(
                                 service,
-                                if (on) "已开启：输入「.」后自动加空格" else "已关闭：输入「.」后自动加空格",
+                                if (on) "已开启：输入「.」「,」后自动加空格" else "已关闭：输入「.」「,」后自动加空格",
                                 Toast.LENGTH_SHORT
                             ).show()
                         }

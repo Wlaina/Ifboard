@@ -98,6 +98,7 @@ class InputView(
 
     companion object {
         const val FLOATING_CORNER_DP = 18f
+        private const val FLOATING_SWITCH_ANIM_MS = 280L
         private const val FLOATING_HANDLE_HEIGHT_DP = 28
         private const val DOUBLE_TAP_TIMEOUT_MS = 280L
     }
@@ -298,8 +299,69 @@ class InputView(
 
     @Keep
     private val onFloatingChangedListener = ManagedPreference.OnChangeListener<Boolean> { _, _ ->
+        val from = captureKeyboardRect()
         updateKeyboardSize()
         service.updateFloatingWindowState()
+        if (from != null) animateKeyboardFrom(from)
+    }
+
+    /** 键盘当前在屏幕上的位置与大小（未显示时为 null） */
+    private fun captureKeyboardRect(): android.graphics.Rect? {
+        if (!keyboardView.isAttachedToWindow || keyboardView.width == 0 || keyboardView.height == 0) return null
+        val loc = IntArray(2)
+        keyboardView.getLocationOnScreen(loc)
+        return android.graphics.Rect(loc[0], loc[1], loc[0] + keyboardView.width, loc[1] + keyboardView.height)
+    }
+
+    /**
+     * Ifboard：常规键盘 ⇄ 悬浮键盘的过渡动画。等新尺寸真正布局完成后，
+     * 先把键盘摆回切换前的位置和大小，再平滑缩放 / 平移到新位置。
+     */
+    private fun animateKeyboardFrom(from: android.graphics.Rect) {
+        keyboardView.animate().cancel()
+        // 新尺寸布局完成前先隐藏，避免键盘在终点先闪出一帧空白
+        keyboardView.alpha = 0f
+        var done = false
+        val listener = object : View.OnLayoutChangeListener {
+            override fun onLayoutChange(
+                v: View, l: Int, t: Int, r: Int, b: Int, oldL: Int, oldT: Int, oldR: Int, oldB: Int
+            ) {
+                if (done || (r - l == from.width() && b - t == from.height())) return
+                done = true
+                v.removeOnLayoutChangeListener(this)
+                // 输入法窗口本身也会随之改变大小：再等两帧，让位置稳定后再量终点
+                v.post { v.postOnAnimation {
+                    val to = captureKeyboardRect()
+                    if (to == null) { v.alpha = 1f; return@postOnAnimation }
+                    v.pivotX = 0f
+                    v.pivotY = 0f
+                    v.scaleX = from.width().toFloat() / to.width()
+                    v.scaleY = from.height().toFloat() / to.height()
+                    v.translationX = (from.left - to.left).toFloat()
+                    v.translationY = (from.top - to.top).toFloat()
+                    v.alpha = 1f
+                    v.animate().scaleX(1f).scaleY(1f).translationX(0f).translationY(0f)
+                        .setDuration(FLOATING_SWITCH_ANIM_MS)
+                        .setInterpolator(android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f))
+                        .withEndAction { v.pivotX = v.width / 2f; v.pivotY = v.height / 2f }
+                        .start()
+                    if (isFloating) {
+                        floatingHandleBar.alpha = 0f
+                        floatingHandleBar.animate().alpha(1f).setStartDelay(FLOATING_SWITCH_ANIM_MS / 2)
+                            .setDuration(FLOATING_SWITCH_ANIM_MS / 2).start()
+                    }
+                } }
+            }
+        }
+        keyboardView.addOnLayoutChangeListener(listener)
+        // 布局没有变化（例如尺寸恰好相同）时不留下监听
+        keyboardView.postDelayed({
+            if (!done) {
+                done = true
+                keyboardView.removeOnLayoutChangeListener(listener)
+                keyboardView.alpha = 1f
+            }
+        }, 600)
     }
 
     private val floatingOutlineProvider = object : ViewOutlineProvider() {

@@ -596,6 +596,22 @@
                                                   Checked="InputControl_Changed" Unchecked="InputControl_Changed" />
                                     </Grid>
 
+                                    <Border Style="{StaticResource CardDividerStyle}" />
+
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="英文模式下「.」「,」后自动加空格" Style="{StaticResource RowTitleStyle}" />
+                                            <TextBlock Text="在小狼毫英文模式中输入句点或逗号后，接着打下一个单词时自动在它前面补一个空格；小数和千分位（3.14、1,000）、省略号、e.g. 这类缩写和句末回车不受影响（需重新部署生效）。"
+                                                       Style="{StaticResource RowDescStyle}" />
+                                        </StackPanel>
+                                        <CheckBox x:Name="AsciiAutoSpaceCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
+                                                  Checked="InputControl_Changed" Unchecked="InputControl_Changed" />
+                                    </Grid>
+
                                     <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
                                         <Button x:Name="ApplyRimeBtn" Style="{StaticResource BrandButtonStyle}"
                                                 Content="保存输入方案并部署生效"

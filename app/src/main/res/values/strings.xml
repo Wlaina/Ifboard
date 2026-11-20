@@ -338,7 +338,7 @@
     <string name="gb_auto_correct">English auto-correction</string>
     <string name="gb_auto_capitalize">English auto-capitalization</string>
     <string name="gb_double_space_period">Double-space period (English)</string>
-    <string name="auto_space_after_period">Add a space after \".\"</string>
+    <string name="auto_space_after_period">Add a space after \".\" and \",\"</string>
     <string name="ifb_glass_effect">Liquid glass</string>
     <string name="ifb_glass_effect_summary">Translucent Gaussian blur background requires Android 12+ with system cross-window blur enabled; unsupported ROMs keep an opaque backdrop with frosted popups</string>
     <string name="clear_all_images">Clear all images</string>

@@ -96,6 +96,10 @@ object IfboardSync {
 
     /** Ask Rime to export this device's snapshot and merge the others (same as the keyboard's 同步) */
     suspend fun rimeSync() {
+        // librime 合并同步快照时会建临时库「.temp」，Android 上合并后删不干净；
+        // 残留的空 .temp.userdb 会在下次同步时被当成用户词库去备份并报
+        // 「failed synchronizing 1/2 user dicts」，表现为先报错再成功。同步前先清掉它。
+        removeStaleTempUserDb()
         runCatching {
             val conn = FcitxDaemon.connect("IfboardSync")
             conn.runOnReady {
@@ -106,6 +110,11 @@ object IfboardSync {
             FcitxDaemon.disconnect("IfboardSync")
         }
         delay(2500)
+    }
+
+    private fun removeStaleTempUserDb() = runCatching {
+        val dir = File(rimeDir(FcitxApplication.getInstance()), ".temp.userdb")
+        if (dir.isDirectory) dir.deleteRecursively()
     }
 
     private class Dav(base: String, private val user: String, private val pass: String) {

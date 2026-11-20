@@ -74,6 +74,7 @@ public static class RimeConfigService
             prefs.FuzzyInIng = txt.Contains("derive/ing$/in/", StringComparison.Ordinal);
             prefs.FuzzyZhChSh = txt.Contains("derive/^([zcs])h/$1/", StringComparison.Ordinal);
             prefs.GrammarEnabled = txt.Contains("language: wanxiang-lts-zh-hans", StringComparison.Ordinal);
+            prefs.AsciiAutoSpace = txt.Contains(AsciiAutoSpaceProcessor, StringComparison.Ordinal);
             if (txt.Contains("translator/enable_correction: false", StringComparison.Ordinal))
                 prefs.EnableCorrection = false;
             else if (txt.Contains("translator/enable_correction: true", StringComparison.Ordinal))
@@ -95,8 +96,26 @@ public static class RimeConfigService
         EnsureCustomPhrasePlaceholders();
         WriteDefaultCustomYaml(prefs);
         PatchDefaultYamlTabBinding(prefs.TabPageFlip);
+        WriteAsciiAutoSpaceLua();
         WriteRimeIceCustomYaml(prefs);
         WriteFlypyCustomYaml(prefs);
+    }
+
+    private const string AsciiAutoSpaceProcessor = "lua_processor@*ifb_ascii_autospace";
+
+    /// <summary>写出英文模式自动空格的 Lua 处理器（是否启用由方案补丁决定）</summary>
+    private static void WriteAsciiAutoSpaceLua()
+    {
+        var dir = Path.Combine(Paths.RimeUserDir, "lua");
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "ifb_ascii_autospace.lua"), AsciiAutoSpaceLua.Source, new UTF8Encoding(false));
+    }
+
+    private static void AppendAsciiAutoSpacePatch(StringBuilder sb, RimePreferences prefs)
+    {
+        if (!prefs.AsciiAutoSpace) return;
+        sb.AppendLine("  # 英文模式下「.」「,」后自动加空格");
+        sb.AppendLine($"  engine/processors/@before 0: {AsciiAutoSpaceProcessor}");
     }
 
     public static void EnsureCustomPhrasePlaceholders()
@@ -194,6 +213,7 @@ public static class RimeConfigService
         if (prefs.GrammarEnabled)
             AppendGrammarPatch(sb);
         sb.AppendLine($"  translator/enable_correction: {(prefs.EnableCorrection ? "true" : "false")}");
+        AppendAsciiAutoSpacePatch(sb, prefs);
 
         if (prefs.FuzzyEnEng || prefs.FuzzyInIng || prefs.FuzzyZhChSh)
         {
@@ -228,6 +248,7 @@ public static class RimeConfigService
         if (prefs.GrammarEnabled)
             AppendGrammarPatch(sb);
         sb.AppendLine($"  translator/enable_correction: {(prefs.EnableCorrection ? "true" : "false")}");
+        AppendAsciiAutoSpacePatch(sb, prefs);
 
         sb.AppendLine("  switches:");
         sb.AppendLine("    - name: ascii_mode");
