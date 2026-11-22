@@ -65,7 +65,7 @@ object IfboardSync {
     private val autoSyncRunning = AtomicBoolean(false)
     private val lastAutoAttemptMs = AtomicLong(0L)
 
-    private val http by lazy {
+    internal val http by lazy {
         OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
@@ -117,7 +117,7 @@ object IfboardSync {
         if (dir.isDirectory) dir.deleteRecursively()
     }
 
-    private class Dav(base: String, private val user: String, private val pass: String) {
+    internal class Dav(base: String, private val user: String, private val pass: String) {
         val root = base.trimEnd('/') + "/"
         private fun req(url: String) = Request.Builder().url(url).header("Authorization", Credentials.basic(user, pass))
 
@@ -138,6 +138,17 @@ object IfboardSync {
             executeFriendly(http, req(root + path).put(bytes.toRequestBody("text/plain".toMediaType())).build()).use {
                 if (it.code == 401) error("账号或密码不对")
                 if (!it.isSuccessful) error("上传失败（${it.code}）")
+            }
+        }
+
+        /** 条件下载：内容未变（304）时返回 (null, 原 etag)，省流量 */
+        fun getIfChanged(path: String, etag: String?): Pair<ByteArray?, String?> {
+            val b = req(root + path).get()
+            if (!etag.isNullOrEmpty()) b.header("If-None-Match", etag)
+            executeFriendly(http, b.build()).use {
+                if (it.code == 304) return null to etag
+                if (!it.isSuccessful) return null to null
+                return it.body?.bytes() to it.header("ETag")
             }
         }
 

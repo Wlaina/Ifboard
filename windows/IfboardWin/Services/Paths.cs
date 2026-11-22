@@ -5,7 +5,7 @@ namespace IfboardWin.Services;
 
 public static class Paths
 {
-    public const string AppVersion = "1.3.0";
+    public const string AppVersion = "1.3.1";
     public static string UserAgent => $"Ifboard-Windows/{AppVersion}";
 
     public static string RimeUserDir =>

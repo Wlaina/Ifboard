@@ -74,6 +74,10 @@ public sealed class AppSettings
     public bool AutoCheckUpdate { get; set; } = true;
     public bool ShowTaskbarImeIcon { get; set; } = true;
     public bool ShowAsciiSwitchTip { get; set; } = false;
+
+    /// <summary>剪贴板同步（局域网直连 + WebDAV 兜底，端到端加密），默认关闭</summary>
+    public bool ClipboardSyncEnabled { get; set; } = false;
+    public string? ClipSyncDeviceId { get; set; }
 }
 
 public sealed class RimePreferences

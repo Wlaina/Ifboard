@@ -621,6 +621,85 @@ public static class WebDavService
 
     #region Helpers
 
+    // ===== 剪贴板同步（WebDAV 兜底）：所有内容均为端到端加密后的密文 =====
+    public const string ClipDirName = "_clipboard";
+
+    public static HttpClient CreateClipClient(WebDavConfig cfg)
+    {
+        var client = CreateClient(cfg);
+        client.Timeout = TimeSpan.FromSeconds(20);
+        return client;
+    }
+
+    private static string ClipDirUrl(WebDavConfig cfg) => $"{BuildBaseDirUrl(cfg)}/{ClipDirName}";
+
+    public static async Task ClipPutAsync(HttpClient http, WebDavConfig cfg, string name, byte[] data, CancellationToken ct = default)
+    {
+        var dir = ClipDirUrl(cfg);
+        try
+        {
+            await PutBytesAsync(http, $"{dir}/{Uri.EscapeDataString(name)}", data, "application/octet-stream", ct);
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            // 目录不存在时创建后重试一次
+            await EnsureMkcolPathAsync(http, cfg, ct);
+            await EnsureMkcolAsync(http, dir, ct);
+            await PutBytesAsync(http, $"{dir}/{Uri.EscapeDataString(name)}", data, "application/octet-stream", ct);
+        }
+    }
+
+    /// <summary>
+    /// 写入同步文件；遇到网盘残留的锁（HTTP 423，例如上次上传被中断）时改写备用文件名 -2 / -3。
+    /// 读取方按前缀把这些文件视为同一组，并以内容里的时间戳取最新的。
+    /// </summary>
+    public static async Task<string> ClipPutWithLockFallbackAsync(HttpClient http, WebDavConfig cfg, string name, byte[] data, CancellationToken ct = default)
+    {
+        var stem = name.EndsWith(".dat", StringComparison.Ordinal) ? name[..^4] : name;
+        string[] candidates = [name, stem + "-2.dat", stem + "-3.dat"];
+        HttpRequestException? last = null;
+        foreach (var candidate in candidates)
+        {
+            try
+            {
+                await ClipPutAsync(http, cfg, candidate, data, ct);
+                return candidate;
+            }
+            catch (HttpRequestException e) when (e.StatusCode == HttpStatusCode.Locked || e.Message.Contains("423"))
+            {
+                last = e;
+            }
+        }
+        throw last!;
+    }
+
+    public static async Task<IReadOnlyList<(string Name, DateTimeOffset Modified, long Size)>> ClipListAsync(
+        HttpClient http, WebDavConfig cfg, CancellationToken ct = default)
+    {
+        try
+        {
+            var entries = await PropFindAsync(http, ClipDirUrl(cfg), ct);
+            return entries.Where(e => !e.IsDirectory).Select(e => (e.Name, e.LastModified, e.Size)).ToList();
+        }
+        catch (HttpRequestException e) when (e.StatusCode == HttpStatusCode.NotFound)
+        {
+            return [];
+        }
+    }
+
+    public static async Task<byte[]?> ClipGetAsync(HttpClient http, WebDavConfig cfg, string name, CancellationToken ct = default)
+    {
+        using var resp = await http.GetAsync($"{ClipDirUrl(cfg)}/{Uri.EscapeDataString(name)}", ct);
+        if (!resp.IsSuccessStatusCode) return null;
+        return await resp.Content.ReadAsByteArrayAsync(ct);
+    }
+
+    public static async Task ClipDeleteAsync(HttpClient http, WebDavConfig cfg, string name, CancellationToken ct = default)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Delete, $"{ClipDirUrl(cfg)}/{Uri.EscapeDataString(name)}");
+        using var _ = await http.SendAsync(req, ct);
+    }
+
     private static void ValidateConfig(WebDavConfig cfg)
     {
         if (string.IsNullOrWhiteSpace(cfg.Url))

@@ -22,7 +22,8 @@ sealed class StatusAreaEntry(
             Keyboard,
             ThemeList,
             FloatingKeyboard,
-            AutoSpace
+            AutoSpace,
+            ClipSync
         }
     }
 

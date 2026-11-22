@@ -32,6 +32,8 @@ import org.fcitx.fcitx5.android.input.dependency.theme
 import org.fcitx.fcitx5.android.input.editorinfo.EditorInfoWindow
 import org.fcitx.fcitx5.android.input.keyboard.KeyboardWindow
 import org.fcitx.fcitx5.android.input.status.StatusAreaEntry.Android.Type.AutoSpace
+import org.fcitx.fcitx5.android.input.status.StatusAreaEntry.Android.Type.ClipSync as ClipSyncType
+import org.fcitx.fcitx5.android.ifboard.clipsync.ClipSync
 import org.fcitx.fcitx5.android.input.status.StatusAreaEntry.Android.Type.FloatingKeyboard
 import org.fcitx.fcitx5.android.input.status.StatusAreaEntry.Android.Type.InputMethod
 import org.fcitx.fcitx5.android.input.status.StatusAreaEntry.Android.Type.Keyboard
@@ -97,6 +99,12 @@ class StatusAreaWindow : InputWindow.ExtendedInputWindow<StatusAreaWindow>(),
             R.drawable.ic_baseline_space_bar_24,
             AutoSpace,
             active = autoSpaceAfterPeriod.getValue()
+        ),
+        StatusAreaEntry.Android(
+            "剪贴板同步",
+            R.drawable.ic_gb_content_paste,
+            ClipSyncType,
+            active = ClipSync.isEnabled()
         ),
         StatusAreaEntry.Android(
             context.getString(R.string.virtual_keyboard),
@@ -180,6 +188,13 @@ class StatusAreaWindow : InputWindow.ExtendedInputWindow<StatusAreaWindow>(),
                         FloatingKeyboard -> {
                             floatingKeyboard.setValue(!floatingKeyboard.getValue())
                             windowManager.attachWindow(KeyboardWindow)
+                        }
+                        ClipSyncType -> {
+                            val on = !ClipSync.isEnabled()
+                            // 开启时由 ClipSync 在连接完成后提示结果（已连接电脑 / 网盘中转 / 缺少账号），避免连弹两条
+                            ClipSync.setEnabled(on)
+                            onStatusAreaUpdate(lastActions)
+                            if (!on) Toast.makeText(service, "剪贴板同步已关闭", Toast.LENGTH_SHORT).show()
                         }
                         AutoSpace -> {
                             val on = !autoSpaceAfterPeriod.getValue()

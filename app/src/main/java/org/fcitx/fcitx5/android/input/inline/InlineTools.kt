@@ -483,7 +483,7 @@ class VoiceBar(
             listening = false
             lastPartial = ""
             service.currentInputConnection?.finishComposingText()
-            Timber.d("IfboardVoice: fast-commit partial (+%dms): %s", System.currentTimeMillis() - eosMs, text)
+            Timber.i("IfboardVoiceT fast-commit +%dms after end of speech", System.currentTimeMillis() - eosMs)
             runCatching { recognizer?.cancel() }
             if (active) handler.postDelayed({ if (active && !listening) listen() }, 40)
         }
@@ -634,7 +634,7 @@ class VoiceBar(
             lastPartial = ""
             val ic = service.currentInputConnection
             if (text.isNotEmpty()) ic?.commitText(text, 1) else ic?.finishComposingText()
-            Timber.d("IfboardVoice: onResults (+%dms after eos): %s", if (eosMs > 0) System.currentTimeMillis() - eosMs else 0, text)
+            Timber.i("IfboardVoiceT final +%dms after end of speech", if (eosMs > 0) System.currentTimeMillis() - eosMs else -1)
             if (active) handler.postDelayed({ if (active && !listening) listen() }, 40)
         }
         override fun onPartialResults(partialResults: Bundle?) {
@@ -839,7 +839,9 @@ class VoiceBar(
             // 本机已装离线模型时直接走离线识别：不经网络往返，实时文字明显更快（Gboard 默认也是离线优先）
             preferOffline = isOfflineInstalled(lang)
             if (preferOffline) putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-            segmentedSession = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !segmentedUnsupported
+            // 实测（小米 14 / Google 语音服务，中英文）：分段会话模式说话期间经常完全不推送实时文字，
+            // 整句说完才一次性出字，体感很慢；逐句模式能边说边出字，所以默认使用逐句模式 + 快速续听
+            segmentedSession = UseSegmentedSession && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !segmentedUnsupported
             if (segmentedSession) {
                 // 分段会话：停顿只产生分段结果，整段会话持续收音，省掉每句话重启识别器的 0.5~1 秒空窗
                 putExtra(RecognizerIntent.EXTRA_SEGMENTED_SESSION, RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS)
@@ -862,6 +864,9 @@ class VoiceBar(
         ready = false
         sessionStartMs = System.currentTimeMillis()
         partialSeenInSegment = false
+        lastPartialMs = 0L
+        speechBeginMs = 0L
+        firstPartialLogged = false
         r.startListening(intent)
         // a recognizer that cannot be reached (e.g. hidden or unconfigured by the ROM) never calls back
         handler.postDelayed({
@@ -929,6 +934,7 @@ class VoiceBar(
 
     companion object {
         private const val MicSize = 30
+        private const val UseSegmentedSession = false
         /** 分段会话最长持续时间，到时自动续开下一段 */
         // Google 语音服务按 Integer 读取该值（传 Long 会被当成 0 并忽略分段会话）
         private const val SegmentedSessionMillis: Int = 5 * 60_000

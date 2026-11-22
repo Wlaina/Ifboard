@@ -103,6 +103,7 @@ public partial class MainWindow : Window
                 ? $"上次同步：{DateTimeOffset.FromUnixTimeMilliseconds(_webDav.LastSyncUnixMs).LocalDateTime:MM-dd HH:mm}"
                 : "上次同步：尚未同步";
             DailyAutoSyncCheck.IsChecked = _settings.AutoSyncDaily;
+            RefreshClipboardSyncUi();
             AutoCheckUpdateCheck.IsChecked = _settings.AutoCheckUpdate;
 
             // 仅当本机尚无 WebDAV 密码且存在旧版配置文件时提示一键导入
@@ -667,6 +668,27 @@ public partial class MainWindow : Window
         _settings.AutoCheckUpdate = AutoCheckUpdateCheck.IsChecked == true;
         AppSettingsService.Save(_settings);
         SetStatus("自动同步与更新检查偏好已保存。");
+    }
+
+    private bool _clipStatusHooked;
+
+    public void RefreshClipboardSyncUi()
+    {
+        var on = AppSettingsService.Load().ClipboardSyncEnabled;
+        ClipboardSyncCheck.IsChecked = on;
+        ClipSyncStatusText.Text = "当前状态：" + ClipboardSyncService.Status;
+        if (!_clipStatusHooked)
+        {
+            _clipStatusHooked = true;
+            ClipboardSyncService.StatusChanged += s => Dispatcher.BeginInvoke(() => ClipSyncStatusText.Text = "当前状态：" + s);
+        }
+    }
+
+    private async void ClipboardSyncCheck_Click(object sender, RoutedEventArgs e)
+    {
+        if (System.Windows.Application.Current is App app)
+            await app.ToggleClipboardSyncAsync();
+        RefreshClipboardSyncUi();
     }
 
     private void InputControl_Changed(object sender, RoutedEventArgs e)

@@ -246,11 +246,14 @@ object ClipboardManager : ClipboardManager.OnPrimaryClipChangedListener,
                         if (fromListener || ts >= processStartTime - 60_000L) {
                             onImageListeners.forEach { it.onImage(uri, mime, ts) }
                         }
+                        if (fromListener) org.fcitx.fcitx5.android.ifboard.clipsync.ClipSync.onLocalImage(uri, mime)
                     }
                     return@withLock
                 }
                 if (entry.text.isBlank()) return@withLock
                 lastImageTimestamp = 0L
+                // 剪贴板同步：本机真实的复制事件才发送（主动补读不算）
+                if (fromListener) org.fcitx.fcitx5.android.ifboard.clipsync.ClipSync.onLocalText(entry.text)
                 try {
                     clbDao.find(entry.text, entry.sensitive)?.let {
                         // 主动同步发现库中已存在时，不覆盖原时间戳或重复弹出工具栏提示

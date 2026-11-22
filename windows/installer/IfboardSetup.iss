@@ -1,5 +1,5 @@
 #define MyAppName "Ifboard for Windows"
-#define MyAppVersion "1.3.0"
+#define MyAppVersion "1.3.1"
 #define MyAppPublisher "Ifboard"
 #define MyAppURL "https://github.com/Wlaina/Ifboard"
 #define MyAppExeName "IfboardWin.exe"
@@ -64,10 +64,14 @@ Name: "{autodesktop}\Ifboard 控制中心"; Filename: "{app}\{#MyAppExeName}"; T
 [Run]
 Filename: "{tmp}\weasel-0.17.4.0-installer.exe"; Parameters: "/S"; StatusMsg: "正在安装小狼毫输入法引擎 (Weasel 0.17.4)..."; Flags: waituntilterminated
 Filename: "powershell.exe"; Parameters: "{code:GetPostInstallParams}"; StatusMsg: "正在部署雾凇词库、万象语法模型与暖纸皮肤..."; Flags: runhidden waituntilterminated runasoriginaluser
+; 剪贴板同步：只放行 Ifboard 控制中心本身的入站连接（TCP 47321 / UDP 47322，内容端到端加密）
+Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Ifboard Clipboard Sync"""; Flags: runhidden waituntilterminated
+Filename: "netsh.exe"; Parameters: "advfirewall firewall add rule name=""Ifboard Clipboard Sync"" dir=in action=allow program=""{app}\{#MyAppExeName}"" enable=yes profile=any"; Flags: runhidden waituntilterminated
 Filename: "{app}\{#MyAppExeName}"; Description: "立即打开 Ifboard 控制中心"; Flags: nowait postinstall skipifsilent runasoriginaluser
 Filename: "{app}\{#MyAppExeName}"; Parameters: "--tray"; Tasks: autostart; Flags: nowait runasoriginaluser skipifnotsilent
 
 [UninstallRun]
+Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Ifboard Clipboard Sync"""; Flags: runhidden; RunOnceId: "RemoveIfboardClipFirewall"
 Filename: "reg.exe"; Parameters: "delete HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v IfboardDesktopTray /f"; Flags: runhidden; RunOnceId: "RemoveIfboardTrayRunKey"
 
 [Code]

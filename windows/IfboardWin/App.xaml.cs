@@ -141,6 +141,9 @@ public partial class App : System.Windows.Application
         InitializeTrayIcon();
         SystemEvents.UserPreferenceChanged += OnSystemPreferenceChanged;
         StartBackgroundMaintenance();
+        // 剪贴板同步：仅在用户开启后启动（空闲时只有监听线程，几乎不占资源）
+        if (settings.ClipboardSyncEnabled)
+            _ = StartClipboardSyncThenTrimAsync();
 
         var startInTray = e.Args.Any(a => string.Equals(a, "--tray", StringComparison.OrdinalIgnoreCase));
         if (startInTray)
@@ -299,6 +302,7 @@ public partial class App : System.Windows.Application
     public void ExitApplication()
     {
         _isExplicitExit = true;
+        ClipboardSyncService.Stop();
         _autoBgTimer?.Stop();
         _autoBgTimer = null;
         SystemEvents.UserPreferenceChanged -= OnSystemPreferenceChanged;
@@ -603,6 +607,9 @@ public partial class App : System.Windows.Application
         menu.Items.Add(MakeItem("打开 Ifboard 控制中心", ShowMainWindow, bold: true));
         menu.Items.Add(MakeSep());
         menu.Items.Add(MakeItem("同步云端词库（WebDAV）", () => _ = RunTrayWebDavSyncAsync(), isEnabled: !busy));
+        menu.Items.Add(MakeItem(
+            settings.ClipboardSyncEnabled ? $"剪贴板同步：{ClipboardSyncService.Status}" : "剪贴板同步（手机 ⇄ 电脑）",
+            () => _ = ToggleClipboardSyncAsync(), isChecked: settings.ClipboardSyncEnabled));
         menu.Items.Add(MakeSep());
         menu.Items.Add(MakeItem("切换至「跟随系统主题色」皮肤", () => _ = SwitchWeaselThemeFromTrayAsync(ThemePresetKind.SystemAccent), isEnabled: !busy, isChecked: settings.WeaselTheme == ThemePresetKind.SystemAccent));
         menu.Items.Add(MakeItem("切换至「Claude 陶土橙」皮肤", () => _ = SwitchWeaselThemeFromTrayAsync(ThemePresetKind.ClaudeTerracotta), isEnabled: !busy, isChecked: settings.WeaselTheme == ThemePresetKind.ClaudeTerracotta));
@@ -910,6 +917,28 @@ public partial class App : System.Windows.Application
             ScheduleHiddenWindowRelease();
             ScheduleTrayTrim(aggressive: false, delayMs: 400);
         }
+    }
+
+    private async Task StartClipboardSyncThenTrimAsync()
+    {
+        await ClipboardSyncService.StartAsync(Dispatcher);
+        // 同步服务在启动裁剪之后才建立（密钥推导、网络与网盘连接），这里再裁剪一次，保持托盘常驻占用低
+        ScheduleTrayTrim(aggressive: true, delayMs: 15000);
+    }
+
+    public async Task ToggleClipboardSyncAsync()
+    {
+        var settings = AppSettingsService.Load();
+        settings.ClipboardSyncEnabled = !settings.ClipboardSyncEnabled;
+        AppSettingsService.Save(settings);
+        var status = await ClipboardSyncService.StartAsync(Dispatcher);
+        ScheduleTrayTrim(aggressive: true, delayMs: 15000);
+        await Dispatcher.InvokeAsync(() => _mainWindow?.RefreshClipboardSyncUi());
+        _trayIcon?.ShowBalloonTip(
+            2500,
+            settings.ClipboardSyncEnabled ? "剪贴板同步已开启" : "剪贴板同步已关闭",
+            settings.ClipboardSyncEnabled ? status : "手机与电脑之间不再同步复制内容。",
+            WinForms.ToolTipIcon.Info);
     }
 
     private async Task ToggleAsciiSwitchTipFromTrayAsync()

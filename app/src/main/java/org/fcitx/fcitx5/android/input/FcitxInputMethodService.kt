@@ -979,6 +979,8 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         Timber.d("onStartInputView: restarting=$restarting")
         ensureSmsObserverRegistered()
         org.fcitx.fcitx5.android.ifboard.IfboardSync.maybeAutoSync(applicationContext)
+        // 剪贴板同步：弹出键盘时连上电脑并取回电脑最新复制的内容（未开启时不做任何事）
+        org.fcitx.fcitx5.android.ifboard.clipsync.ClipSync.onKeyboardShown()
         postFcitxJob {
             focus(true)
         }
@@ -1287,6 +1289,7 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         resetComposingState()
         // 收起键盘时必须停止语音识别，否则识别器会自动续听并一直占用麦克风
         inputView?.stopInlineVoice()
+        org.fcitx.fcitx5.android.ifboard.clipsync.ClipSync.onKeyboardHidden()
         postFcitxJob {
             focusOutIn()
         }

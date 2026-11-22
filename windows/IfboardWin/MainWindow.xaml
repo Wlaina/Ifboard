@@ -329,6 +329,23 @@
                                         <CheckBox x:Name="DailyAutoSyncCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
                                                   Checked="AppOptionCheck_Changed" Unchecked="AppOptionCheck_Changed" />
                                     </Grid>
+
+                                    <Border Style="{StaticResource CardDividerStyle}" />
+
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="剪贴板同步（手机 ⇄ 电脑）" Style="{StaticResource RowTitleStyle}" />
+                                            <TextBlock Text="复制的文字与图片在手机和电脑之间自动同步：同一网络下局域网直连（约 0.1 秒），不在一起时经 WebDAV 中转。内容用上方 WebDAV 账号密码推导的密钥端到端加密，网盘与局域网里都只有密文。两端需填写同一 WebDAV 账号，并在手机键盘左上角菜单中同样开启。"
+                                                       Style="{StaticResource RowDescStyle}" />
+                                            <TextBlock x:Name="ClipSyncStatusText" Text="未开启" Style="{StaticResource RowDescStyle}" Margin="0,4,0,0" />
+                                        </StackPanel>
+                                        <CheckBox x:Name="ClipboardSyncCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
+                                                  Click="ClipboardSyncCheck_Click" />
+                                    </Grid>
                                 </StackPanel>
                             </Border>
 
