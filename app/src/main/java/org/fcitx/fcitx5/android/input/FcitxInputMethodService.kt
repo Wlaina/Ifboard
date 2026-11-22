@@ -519,8 +519,31 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
             InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
             InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,
             InputType.TYPE_TEXT_VARIATION_FILTER -> false
-            else -> true
+            else -> {
+                val info = currentInputEditorInfo
+                // 登录 / 账号类输入框几乎都会关掉输入建议：这类框里不自动加空格
+                if (type and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS != 0) return false
+                // 很多 App 与网页的账号框只是普通文本框：按提示文字识别邮箱 / 账号 / 密码 / 网址
+                val hint = listOfNotNull(info?.hintText, info?.label).joinToString(" ")
+                !AccountFieldHint.containsMatchIn(hint)
+            }
         }
+    }
+
+    /**
+     * 正在输入的内容看起来是邮箱 / 网址 / 账号：当前这串字符（上一个空白之后）里有 @ / : 之类，
+     * 或者单行输入框里到目前为止一个空格都没有（john.doe、example.com 这类）。
+     */
+    private fun looksLikeAccountText(ic: InputConnection, beforeStart: Int, composingLen: Int, text: String): Boolean {
+        val existing = ic.getTextBeforeCursor(AccountScanChars + composingLen, 0)
+            ?.toString().orEmpty().dropLast(composingLen)
+        val all = existing + text.dropLast(1)
+        val token = all.takeLastWhile { !it.isWhitespace() }
+        if (token.any { it == '@' || it == '/' || it == ':' || it == '\\' }) return true
+        val type = currentInputEditorInfo?.inputType ?: 0
+        val multiLine = type and (InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_IME_MULTI_LINE) != 0
+        val reachedStart = existing.length < AccountScanChars && beforeStart <= existing.length
+        return !multiLine && reachedStart && all.none { it.isWhitespace() }
     }
 
     /**
@@ -555,6 +578,8 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         val prev2 = if (tail.length >= 2) tail[0] else null
         // 小数点 / 千分位（3.14、1,000）、行首或空格后（.net）不加；连续标点（,, / ...）交给收回空格的逻辑
         if (prev == null || prev.isDigit() || prev.isWhitespace()) return text
+        // 正在输入邮箱 / 网址 / 账号时不加
+        if (looksLikeAccountText(ic, beforeStart, composingLen, text)) return text
         // 句点前只有单个字母（e.g. / U.S. / J. K.）不加，免得缩写被拆开；逗号不受此限
         if (mark == '.' && prev.isLetter() && prev.code < 0x80 && (prev2 == null || !prev2.isLetter())) return text
         val start = when {
@@ -1355,6 +1380,13 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
 
     @Suppress("ConstPropertyName")
     companion object {
+        /** 判断是否在输入邮箱 / 账号时往前看的字符数 */
+        private const val AccountScanChars = 200
+        private val AccountFieldHint = Regex(
+            "邮箱|郵箱|电邮|账号|帐号|賬號|用户名|用戶名|登录名|密码|密碼|手机号|手機號|网址|網址|链接|域名|" +
+                "e-?mail|mail|user ?name|user ?id|account|login|sign ?in|password|passcode|\\bpin\\b|url|website|domain|phone",
+            RegexOption.IGNORE_CASE
+        )
         private const val AutoSpaceGluePunct = ".,;:!?)]}'\""
         private const val DeleteAllChunk = 100_000
         const val DeleteSurroundingFlag = "org.fcitx.fcitx5.android.DELETE_SURROUNDING"
