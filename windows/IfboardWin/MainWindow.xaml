@@ -606,7 +606,7 @@
                                         </Grid.ColumnDefinitions>
                                         <StackPanel>
                                             <TextBlock Text="启用 Rime 拼写容错纠错（enable_correction）" Style="{StaticResource RowTitleStyle}" />
-                                            <TextBlock Text="自动修正快打时常见的邻键误触与键序错位，与 Android 端拼写容错行为保持一致（需重新部署生效）。"
+                                            <TextBlock Text="把邻键误触、键序错位的猜测也放进候选，会和正常结果混在一起，可能把不想要的词排到前面，默认关闭；打字常按错邻键时再开启（需重新部署生效）。"
                                                        Style="{StaticResource RowDescStyle}" />
                                         </StackPanel>
                                         <CheckBox x:Name="EnableCorrectionCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"

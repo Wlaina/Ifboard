@@ -96,7 +96,8 @@ public sealed class RimePreferences
     public bool CtrlSpaceOnlySwitch { get; set; }
     public bool TabPageFlip { get; set; } = true;
     public bool GrammarEnabled { get; set; } = true;
-    public bool EnableCorrection { get; set; } = true;
+    /// <summary>librime 拼写纠错会把邻键猜测混进候选、配合语法模型常被排到前面，实测偏激进，默认关闭</summary>
+    public bool EnableCorrection { get; set; } = false;
 
     /// <summary>英文模式（ascii_mode）下输入「.」「,」后，在下一个单词前自动补空格</summary>
     public bool AsciiAutoSpace { get; set; }
