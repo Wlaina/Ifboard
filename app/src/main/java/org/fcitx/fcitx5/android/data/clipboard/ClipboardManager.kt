@@ -247,13 +247,23 @@ object ClipboardManager : ClipboardManager.OnPrimaryClipChangedListener,
                             onImageListeners.forEach { it.onImage(uri, mime, ts) }
                         }
                         if (fromListener) org.fcitx.fcitx5.android.ifboard.clipsync.ClipSync.onLocalImage(uri, mime)
+                    } else if (fromListener) {
+                        // 不是文字也不是图片：可能是文件管理器复制的文件
+                        org.fcitx.fcitx5.android.ifboard.clipsync.ClipSync.onLocalFile(clip)
                     }
                     return@withLock
                 }
                 if (entry.text.isBlank()) return@withLock
                 lastImageTimestamp = 0L
                 // 剪贴板同步：本机真实的复制事件才发送（主动补读不算）
-                if (fromListener) org.fcitx.fcitx5.android.ifboard.clipsync.ClipSync.onLocalText(entry.text)
+                if (fromListener) {
+                    val first = clip.getItemAt(0)
+                    // 文件管理器复制的文件：只有 content:// 链接、没有文字，按文件同步而不是发链接字符串
+                    if (first?.text == null && first?.uri?.scheme == "content")
+                        org.fcitx.fcitx5.android.ifboard.clipsync.ClipSync.onLocalFile(clip)
+                    else
+                        org.fcitx.fcitx5.android.ifboard.clipsync.ClipSync.onLocalText(entry.text)
+                }
                 try {
                     clbDao.find(entry.text, entry.sensitive)?.let {
                         // 主动同步发现库中已存在时，不覆盖原时间戳或重复弹出工具栏提示

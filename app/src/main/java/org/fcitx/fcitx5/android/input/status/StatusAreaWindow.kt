@@ -101,7 +101,8 @@ class StatusAreaWindow : InputWindow.ExtendedInputWindow<StatusAreaWindow>(),
             active = autoSpaceAfterPeriod.getValue()
         ),
         StatusAreaEntry.Android(
-            "剪贴板同步",
+            // 菜单里直接显示同步状态：已连电脑 / 网盘中转 / 待机 / 缺账号
+            if (ClipSync.isEnabled()) "同步·${ClipSync.shortState()}" else "剪贴板同步",
             R.drawable.ic_gb_content_paste,
             ClipSyncType,
             active = ClipSync.isEnabled()

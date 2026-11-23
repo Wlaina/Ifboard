@@ -120,6 +120,29 @@ class ClipMessage(val header: JsonObject, val body: ByteArray = ByteArray(0)) {
             ClipMessage(header, plain.copyOfRange(nl + 1, plain.size))
         }.getOrNull()
 
+        /** 多条内容打包（从旧到新）：每条 = 4 字节大端长度 + 该条 encode() 的字节；与 Windows 端一致 */
+        fun encodeBatch(items: List<ClipMessage>): ByteArray = ByteArrayOutputStream().apply {
+            for (it in items) {
+                val b = it.encode()
+                write(byteArrayOf((b.size ushr 24).toByte(), (b.size ushr 16).toByte(), (b.size ushr 8).toByte(), b.size.toByte()))
+                write(b)
+            }
+        }.toByteArray()
+
+        fun decodeBatch(body: ByteArray): List<ClipMessage> {
+            val out = mutableListOf<ClipMessage>()
+            var off = 0
+            while (off + 4 <= body.size) {
+                val n = ((body[off].toInt() and 0xff) shl 24) or ((body[off + 1].toInt() and 0xff) shl 16) or
+                    ((body[off + 2].toInt() and 0xff) shl 8) or (body[off + 3].toInt() and 0xff)
+                off += 4
+                if (n <= 0 || off + n > body.size) break
+                decode(body.copyOfRange(off, off + n))?.let { out += it }
+                off += n
+            }
+            return out
+        }
+
         fun of(op: String, vararg pairs: Pair<String, Any?>, body: ByteArray = ByteArray(0)) =
             ClipMessage(buildJsonObject {
                 put("op", op)

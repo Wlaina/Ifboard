@@ -1,3 +1,4 @@
+using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -124,6 +125,37 @@ public sealed class ClipMessage
         {
             return null;
         }
+    }
+
+    /// <summary>多条内容打包（从旧到新）：每条 = 4 字节大端长度 + 该条 Encode() 的字节</summary>
+    public static byte[] EncodeBatch(IEnumerable<ClipMessage> items)
+    {
+        using var ms = new MemoryStream();
+        foreach (var it in items)
+        {
+            var b = it.Encode();
+            var len = new byte[4];
+            System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(len, b.Length);
+            ms.Write(len);
+            ms.Write(b);
+        }
+        return ms.ToArray();
+    }
+
+    public static List<ClipMessage> DecodeBatch(byte[] body)
+    {
+        var list = new List<ClipMessage>();
+        var off = 0;
+        while (off + 4 <= body.Length)
+        {
+            var n = System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(body.AsSpan(off, 4));
+            off += 4;
+            if (n <= 0 || off + n > body.Length) break;
+            var m = Decode(body.AsSpan(off, n).ToArray());
+            if (m != null) list.Add(m);
+            off += n;
+        }
+        return list;
     }
 
     public static ClipMessage Of(string op, IEnumerable<KeyValuePair<string, object?>>? fields = null, byte[]? body = null)
