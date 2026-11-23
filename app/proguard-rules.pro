@@ -30,3 +30,6 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# 离线语音（sherpa-onnx）：原生代码按名字读取这些类的字段和方法（JNI），不能被 R8 改名或删除
+-keep class com.k2fsa.sherpa.onnx.** { *; }

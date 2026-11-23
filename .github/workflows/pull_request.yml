@@ -60,6 +60,10 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
 
+      - name: Fetch offline voice library (sherpa-onnx, SHA-256 verified)
+        shell: bash
+        run: bash ifboard/fetch-sherpa-onnx.sh
+
       - name: Build Release APK
         run: |
           ./gradlew :app:assembleRelease

@@ -463,6 +463,76 @@ class VoiceBar(
     private var lastPartial = ""
     private var eosMs = 0L
     private var currentLang = ""
+    /** 本次听写走本机离线识别（sherpa-onnx），不经系统识别服务和网络 */
+    private var offlineMode = false
+
+    private val offlineListener = object : org.fcitx.fcitx5.android.ifboard.voice.OfflineAsr.Listener {
+        override fun onReady() {
+            ready = true
+            segPrefix = null
+            status.text = "正在听取…（离线）"
+            Timber.i("IfboardVoiceT offline ready +%dms", System.currentTimeMillis() - sessionStartMs)
+        }
+
+        /** 本句前要补的分隔（空格或逗号），在这一句开始出字时根据光标前的文字定下来 */
+        private var segPrefix: String? = null
+
+        override fun onPartial(text: String) {
+            if (!active) return
+            lastPartial = text
+            if (text.isEmpty()) return
+            val ic = service.currentInputConnection
+            val prefix = segPrefix ?: org.fcitx.fcitx5.android.ifboard.voice.OfflineAsr
+                .separator(ic?.getTextBeforeCursor(1, 0), text).also { segPrefix = it }
+            ic?.setComposingText(prefix + text, 1)
+            status.text = text
+        }
+
+        override fun onFinal(text: String) {
+            if (!active) return
+            lastPartial = ""
+            val ic = service.currentInputConnection
+            val prefix = segPrefix ?: org.fcitx.fcitx5.android.ifboard.voice.OfflineAsr
+                .separator(ic?.getTextBeforeCursor(1, 0), text)
+            segPrefix = null
+            ic?.commitText(prefix + text, 1)
+            status.text = "正在听取…（离线）"
+        }
+
+        override fun onLevel(level: Float) = pulseTo(level)
+
+        override fun onError(message: String) {
+            if (!active) return
+            Timber.w("IfboardVoice offline: %s", message)
+            org.fcitx.fcitx5.android.ifboard.voice.OfflineAsr.stop()
+            offlineMode = false
+            listening = false
+            service.currentInputConnection?.finishComposingText()
+            lastPartial = ""
+            if (message.contains("权限")) {
+                status.text = message
+                return
+            }
+            // 离线识别不可用（模型损坏、麦克风被占用等）：改用系统识别服务
+            status.text = "离线语音不可用，改用在线识别"
+            handler.postDelayed({ if (active && !listening) listen() }, 300)
+        }
+    }
+
+    /** 离线识别只支持中文、英文 */
+    private fun offlineFits(lang: String) =
+        org.fcitx.fcitx5.android.ifboard.voice.OfflineVoiceModel.usable(service) &&
+            (lang.startsWith("zh") || lang.startsWith("en") || lang.startsWith("cmn") || lang.startsWith("yue"))
+
+    private fun pulseTo(rmsdB: Float) {
+        // at most 38dp across, the bar is 40dp high
+        val s = 1f + (rmsdB.coerceIn(0f, 10f) / 10f) * (MaxPulse - 1f)
+        // 每秒回调 ~10~20 次：变化不明显时不再新建动画，省掉无效的重绘
+        if (kotlin.math.abs(s - lastPulseScale) < 0.04f) return
+        lastPulseScale = s
+        pulse.animate().scaleX(s).scaleY(s).setDuration(90).start()
+    }
+
     /** 识别服务不支持分段会话（立即报错）时回退到逐句模式 */
     private var segmentedUnsupported = false
     private var sessionStartMs = 0L
@@ -561,14 +631,7 @@ class VoiceBar(
             speechBeginMs = System.currentTimeMillis()
             firstPartialLogged = false
         }
-        override fun onRmsChanged(rmsdB: Float) {
-            // at most 38dp across, the bar is 40dp high
-            val s = 1f + (rmsdB.coerceIn(0f, 10f) / 10f) * (MaxPulse - 1f)
-            // 识别服务每秒回调 ~20 次：变化不明显时不再新建动画，省掉无效的重绘
-            if (kotlin.math.abs(s - lastPulseScale) < 0.04f) return
-            lastPulseScale = s
-            pulse.animate().scaleX(s).scaleY(s).setDuration(90).start()
-        }
+        override fun onRmsChanged(rmsdB: Float) = pulseTo(rmsdB)
         override fun onBufferReceived(buffer: ByteArray?) {}
         override fun onEndOfSpeech() {
             eosMs = System.currentTimeMillis()
@@ -697,6 +760,11 @@ class VoiceBar(
         if (!active) return
         val lang = languageProvider()
         if (lang == currentLang) return
+        // 离线模型本身中英混合，中英之间切换不用重开
+        if (offlineMode && offlineFits(lang)) {
+            currentLang = lang
+            return
+        }
         handler.removeCallbacks(endFallbackRunnable)
         if (lastPartial.isNotEmpty()) service.currentInputConnection?.commitText(lastPartial, 1)
         else service.currentInputConnection?.finishComposingText()
@@ -722,7 +790,8 @@ class VoiceBar(
             .setInterpolator(android.view.animation.OvershootInterpolator(2.5f)).start()
         status.text = "请稍候…"
         onActiveChanged?.invoke(true)
-        probeOfflineSupport()
+        offlineMode = offlineFits(languageProvider())
+        if (!offlineMode) probeOfflineSupport()
         listen()
     }
 
@@ -818,6 +887,16 @@ class VoiceBar(
             status.text = "需要麦克风权限，请在弹出的窗口中允许"
             runCatching { org.fcitx.fcitx5.android.ui.main.MicPermissionActivity.launch(service) }
             handler.postDelayed({ stop() }, 1500)
+            return
+        }
+        if (offlineMode) {
+            currentLang = languageProvider()
+            status.text = "正在加载离线语音…"
+            ready = false
+            listening = true
+            lastPartial = ""
+            sessionStartMs = System.currentTimeMillis()
+            org.fcitx.fcitx5.android.ifboard.voice.OfflineAsr.start(service, offlineListener)
             return
         }
         val r = recognizer ?: createSpeechRecognizer(service, forceExplicitComponent)?.also {
@@ -918,6 +997,10 @@ class VoiceBar(
         handler.removeCallbacksAndMessages(null)
         status.setOnClickListener(null)
         status.isClickable = false
+        if (offlineMode) {
+            org.fcitx.fcitx5.android.ifboard.voice.OfflineAsr.stop()
+            offlineMode = false
+        }
         runCatching { recognizer?.stopListening() }
         runCatching { recognizer?.cancel() }
         runCatching { recognizer?.destroy() }

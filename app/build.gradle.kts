@@ -84,6 +84,10 @@ dependencies {
     implementation(project(":lib:libime"))
     implementation(project(":lib:fcitx5-chinese-addons"))
     implementation(project(":lib:common"))
+    // 离线语音识别（k2-fsa/sherpa-onnx，Apache-2.0）；由 ifboard/fetch-sherpa-onnx.sh 下载并校验
+    implementation(files("libs/sherpa-onnx-2.0.1.aar"))
+    // 解压离线语音模型（.tar.bz2）
+    implementation("org.apache.commons:commons-compress:1.27.1")
     implementation(libs.kotlinx.coroutines)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.androidx.activity)

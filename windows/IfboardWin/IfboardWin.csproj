@@ -13,9 +13,9 @@
     <ApplicationIcon>Assets\ifboard.ico</ApplicationIcon>
     <AssemblyName>IfboardWin</AssemblyName>
     <RootNamespace>IfboardWin</RootNamespace>
-    <Version>1.3.1</Version>
-    <AssemblyVersion>1.3.1.0</AssemblyVersion>
-    <FileVersion>1.3.1.0</FileVersion>
+    <Version>1.3.2</Version>
+    <AssemblyVersion>1.3.2.0</AssemblyVersion>
+    <FileVersion>1.3.2.0</FileVersion>
     <Company>Ifboard</Company>
     <Product>Ifboard for Windows</Product>
     <Description>Ifboard 小狼毫控制中心（暖纸液态玻璃风格、WebDAV 同步、语法模型与动态系统皮肤）</Description>

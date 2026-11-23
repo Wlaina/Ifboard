@@ -174,6 +174,8 @@ class IfboardFragment : PaddingPreferenceFragment() {
     private var smsOtpPref: SwitchPreferenceCompat? = null
     private var gramStatus: Preference? = null
     private var gramDelete: Preference? = null
+    private var voiceStatus: Preference? = null
+    private var voiceDelete: Preference? = null
     private var syncing = false
     private var testing = false
 
@@ -423,6 +425,43 @@ class IfboardFragment : PaddingPreferenceFragment() {
             }
             gram.addPreference(gramDelete!!)
 
+            val voice = PreferenceCategory(ctx).apply { title = "离线语音"; isIconSpaceReserved = false }
+            addPreference(voice)
+            voiceStatus = Preference(ctx).apply {
+                key = "ifb_offline_voice_status"
+                title = "中英离线语音模型"
+                isIconSpaceReserved = false
+                setOnPreferenceClickListener { onVoiceStatusClick(); true }
+            }
+            voice.addPreference(voiceStatus!!)
+            voice.addPreference(SwitchPreferenceCompat(ctx).apply {
+                key = org.fcitx.fcitx5.android.ifboard.voice.OfflineVoiceModel.PREF_ENABLED
+                title = "语音输入优先用离线识别"
+                summary = "已下载模型时，中文 / 英文语音在手机本地识别：不联网、声音不离开手机，边说边出字"
+                isIconSpaceReserved = false
+                setDefaultValue(true)
+            })
+            voiceDelete = Preference(ctx).apply {
+                key = "ifb_offline_voice_delete"
+                title = "删除离线语音模型"
+                isIconSpaceReserved = false
+                summary = "释放空间，语音输入改回系统识别服务"
+                setOnPreferenceClickListener {
+                    AlertDialog.Builder(ctx)
+                        .setTitle("删除离线语音模型？")
+                        .setMessage("删除后需要重新下载才能离线识别。")
+                        .setPositiveButton("删除") { _, _ ->
+                            org.fcitx.fcitx5.android.ifboard.voice.OfflineVoiceModel.delete(ctx)
+                            renderVoice(org.fcitx.fcitx5.android.ifboard.voice.OfflineVoiceModel.state.value)
+                        }
+                        .setNegativeButton("取消", null)
+                        .create()
+                        .showWarm(destructive = true)
+                    true
+                }
+            }
+            voice.addPreference(voiceDelete!!)
+
             val upd = PreferenceCategory(ctx).apply { title = "更新"; isIconSpaceReserved = false }
             addPreference(upd)
             upd.addPreference(Preference(ctx).apply {
@@ -540,6 +579,11 @@ class IfboardFragment : PaddingPreferenceFragment() {
                 GrammarModel.state.collect { renderGram(it) }
             }
         }
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+                org.fcitx.fcitx5.android.ifboard.voice.OfflineVoiceModel.state.collect { renderVoice(it) }
+            }
+        }
     }
 
     private fun renderGram(s: GrammarModel.State) {
@@ -560,6 +604,46 @@ class IfboardFragment : PaddingPreferenceFragment() {
         }
         gramStatus?.summary = statusLine
         gramDelete?.isEnabled = installed && !GrammarModel.busy
+    }
+
+    private fun renderVoice(s: org.fcitx.fcitx5.android.ifboard.voice.OfflineVoiceModel.State) {
+        val ctx = context ?: return
+        val m = org.fcitx.fcitx5.android.ifboard.voice.OfflineVoiceModel
+        val installed = m.installed(ctx)
+        voiceStatus?.summary = when (s) {
+            is org.fcitx.fcitx5.android.ifboard.voice.OfflineVoiceModel.State.Downloading ->
+                "正在下载 ${m.mb(s.done)} / ${m.mb(s.total)}（${s.done * 100 / s.total.coerceAtLeast(1)}%），点按可取消"
+            is org.fcitx.fcitx5.android.ifboard.voice.OfflineVoiceModel.State.Unpacking -> "正在校验并解压…"
+            is org.fcitx.fcitx5.android.ifboard.voice.OfflineVoiceModel.State.Failed -> "下载失败：${s.message}。点按重试（会接着上次的进度）"
+            else -> if (installed) "已安装（${m.mb(m.sizeOnDisk(ctx))}，k2-fsa/sherpa-onnx 中英混合流式模型）"
+            else "未下载。点按下载（约 ${m.mb(m.SIZE)}，来自 sherpa-onnx 官方 GitHub，建议连接 Wi-Fi）"
+        }
+        voiceDelete?.isEnabled = installed && !m.busy
+    }
+
+    private fun onVoiceStatusClick() {
+        val ctx = requireContext()
+        val m = org.fcitx.fcitx5.android.ifboard.voice.OfflineVoiceModel
+        when {
+            m.busy -> AlertDialog.Builder(ctx)
+                .setTitle("取消下载？")
+                .setMessage("已下载的部分会保留，下次接着下载。")
+                .setPositiveButton("取消下载") { _, _ -> m.cancel() }
+                .setNegativeButton("继续下载", null)
+                .create()
+                .showWarm(destructive = true)
+            m.installed(ctx) -> Toast.makeText(ctx, "离线语音模型已安装", Toast.LENGTH_SHORT).show()
+            else -> AlertDialog.Builder(ctx)
+                .setTitle("下载离线语音模型")
+                .setMessage(
+                    "k2-fsa/sherpa-onnx 官方发布的中英混合流式识别模型（带标点），约 ${m.mb(m.SIZE)}，" +
+                        "下载后会校验 SHA-256 再解压。\n\n识别完全在手机上进行，声音不会上传。建议连接 Wi-Fi 后下载。"
+                )
+                .setPositiveButton("下载") { _, _ -> m.start(ctx) }
+                .setNegativeButton("以后再说", null)
+                .create()
+                .showWarm()
+        }
     }
 
     private fun onGramStatusClick() {
