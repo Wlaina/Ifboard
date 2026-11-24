@@ -21,7 +21,13 @@ class MainViewModel : ViewModel() {
 
     val toolbarButton = MutableLiveData(ButtonMode.NONE)
 
-    val fcitx: FcitxConnection = FcitxDaemon.connect(javaClass.name)
+    /**
+     * Ifboard：每个实例用自己的连接名。原先都用类名，同时开着两个设置页时（键盘菜单进一个、桌面图标又进一个），
+     * 先关掉的那个会把共用的连接断开，另一个在 onStop 保存配置时抛 "is disconnected" 崩溃。
+     */
+    private val connectionName = "${javaClass.name}#${System.identityHashCode(this)}"
+
+    val fcitx: FcitxConnection = FcitxDaemon.connect(connectionName)
 
     fun setToolbarTitle(title: String) {
         toolbarTitle.value = title
@@ -36,6 +42,6 @@ class MainViewModel : ViewModel() {
     }
 
     override fun onCleared() {
-        FcitxDaemon.disconnect(javaClass.name)
+        FcitxDaemon.disconnect(connectionName)
     }
 }

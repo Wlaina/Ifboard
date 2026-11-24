@@ -1,1019 +1,656 @@
 <Window x:Class="IfboardWin.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:theme="clr-namespace:IfboardWin.Theme"
         Title="Ifboard 控制中心"
-        Width="980" Height="780"
-        MinWidth="840" MinHeight="600"
+        Width="1040" Height="780"
+        MinWidth="880" MinHeight="600"
         WindowStartupLocation="CenterScreen"
         UseLayoutRounding="True"
         SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Display"
         Background="{DynamicResource WpCanvasBrush}"
         Foreground="{DynamicResource WpTextBrush}"
         Icon="pack://application:,,,/Assets/ifboard.ico">
 
-    <Grid ClipToBounds="True">
-        <!-- 暖纸液态玻璃柔和氛围光晕层（静态渲染，避免常驻离屏显存缓存） -->
-        <Canvas IsHitTestVisible="False">
-            <Ellipse Width="520" Height="520" Canvas.Left="-140" Canvas.Top="-160"
-                     Fill="{DynamicResource WpGlow1Brush}" />
-            <Ellipse Width="480" Height="480" Canvas.Left="540" Canvas.Top="-120"
-                     Fill="{DynamicResource WpGlow2Brush}" />
-            <Ellipse Width="460" Height="460" Canvas.Left="120" Canvas.Top="410"
-                     Fill="{DynamicResource WpGlow3Brush}" />
+    <Window.Resources>
+        <!-- 自绘线性图标：24×24，描边 1.7，圆头圆角，不填充 -->
+        <Geometry x:Key="IconCommon">M4,7 H13 M17,7 H20 M4,17 H8 M12,17 H20 M15,4.5 V9.5 M10,14.5 V19.5</Geometry>
+        <Geometry x:Key="IconKeys">M5,6 H19 A2,2 0 0 1 21,8 V16 A2,2 0 0 1 19,18 H5 A2,2 0 0 1 3,16 V8 A2,2 0 0 1 5,6 Z M7,10 H7.01 M11,10 H11.01 M15,10 H15.01 M8,14 H16</Geometry>
+        <Geometry x:Key="IconCandidates">M4,6 H20 M4,12 H15 M4,18 H11</Geometry>
+        <Geometry x:Key="IconLook">M12,3 A9,9 0 1 0 12,21 C13.4,21 14,20.2 14,19.2 C14,17.6 15.1,17 16.6,17 H18 A3,3 0 0 0 21,14 C21,8 17,3 12,3 Z M7.5,11.5 H7.51 M10,7.5 H10.01 M14.5,7.5 H14.51</Geometry>
+        <Geometry x:Key="IconSync">M7,18.5 H17 A4,4 0 0 0 17.6,10.5 A6,6 0 0 0 6.1,9.6 A4.5,4.5 0 0 0 7,18.5 Z</Geometry>
+        <Geometry x:Key="IconDict">M5,4.5 H17 A2,2 0 0 1 19,6.5 V19.5 H7 A2,2 0 0 1 5,17.5 Z M5,17.5 A2,2 0 0 1 7,15.5 H19 M9,8.5 H15</Geometry>
+        <Geometry x:Key="IconAdvanced">M12,9 A3,3 0 1 1 11.99,9 Z M12,2.5 V5 M12,19 V21.5 M2.5,12 H5 M19,12 H21.5 M5.3,5.3 L7.1,7.1 M16.9,16.9 L18.7,18.7 M5.3,18.7 L7.1,16.9 M16.9,7.1 L18.7,5.3</Geometry>
+        <Geometry x:Key="IconAbout">M12,3 A9,9 0 1 1 11.99,3 Z M12,11 V16.5 M12,7.8 H12.01</Geometry>
+
+        <!-- 键帽：surface 底、border-strong 描边、6 圆角、等宽字体、底边阴影略深 -->
+        <Style x:Key="KeyCapStyle" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource WpSurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource WpBorderStrongBrush}" />
+            <Setter Property="BorderThickness" Value="1,1,1,2.5" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="8,2" />
+            <Setter Property="MinHeight" Value="26" />
+            <Setter Property="Margin" Value="0,0,5,0" />
+        </Style>
+        <Style x:Key="KeyCapTextStyle" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="{StaticResource WpMonoFont}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Foreground" Value="{DynamicResource WpTextBrush}" />
+        </Style>
+        <Style x:Key="BadgeStyle" TargetType="Border">
+            <Setter Property="CornerRadius" Value="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={StaticResource PillRadius}}" />
+            <Setter Property="Padding" Value="10,4" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Background" Value="{DynamicResource WpBrandSoftBrush}" />
+        </Style>
+    </Window.Resources>
+
+    <Grid x:Name="RootGrid" ClipToBounds="True">
+        <!-- 三团极淡的流动色晕（主题色 / 鼠尾草绿 / 暖金），约 30 秒一周期，失焦时暂停 -->
+        <Canvas x:Name="GlowLayer" IsHitTestVisible="False">
+            <Ellipse x:Name="Glow1" Width="560" Height="560" Canvas.Left="-160" Canvas.Top="-200" Fill="{DynamicResource WpGlow1Brush}">
+                <Ellipse.RenderTransform><TranslateTransform /></Ellipse.RenderTransform>
+            </Ellipse>
+            <Ellipse x:Name="Glow2" Width="520" Height="520" Canvas.Left="620" Canvas.Top="-140" Fill="{DynamicResource WpGlow2Brush}">
+                <Ellipse.RenderTransform><TranslateTransform /></Ellipse.RenderTransform>
+            </Ellipse>
+            <Ellipse x:Name="Glow3" Width="500" Height="500" Canvas.Left="260" Canvas.Top="420" Fill="{DynamicResource WpGlow3Brush}">
+                <Ellipse.RenderTransform><TranslateTransform /></Ellipse.RenderTransform>
+            </Ellipse>
         </Canvas>
 
-        <Grid Margin="18,14">
+        <Grid Margin="16,14,16,16">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="232" />
-                <ColumnDefinition Width="16" />
+                <ColumnDefinition Width="216" />
+                <ColumnDefinition Width="18" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
-            <!-- 左侧半透明磨砂玻璃导航栏 -->
-            <Border Grid.Column="0"
-                    Background="{DynamicResource WpGlassBgBrush}"
-                    BorderBrush="{DynamicResource WpGlassBorderBrush}"
-                    BorderThickness="1"
-                    CornerRadius="18"
-                    Padding="14,16">
-
+            <!-- ══════════ 左侧液态玻璃导航 ══════════ -->
+            <Border Grid.Column="0" Background="{DynamicResource WpGlassBgBrush}"
+                    BorderBrush="{DynamicResource WpGlassBorderBrush}" BorderThickness="1"
+                    CornerRadius="20" Padding="12,16">
                 <DockPanel LastChildFill="True">
-                    <!-- 顶部品牌区 -->
-                    <StackPanel DockPanel.Dock="Top" Margin="4,0,4,18">
-                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <Border Width="38" Height="38" CornerRadius="10"
-                                    BorderBrush="#55FFFDF9" BorderThickness="0.8">
-                                <Border.Background>
-                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                                        <GradientStop Color="#E38667" Offset="0" />
-                                        <GradientStop Color="#BC5736" Offset="1" />
-                                    </LinearGradientBrush>
-                                </Border.Background>
-                                <Grid Margin="5.5">
-                                    <Border Background="#FAF9F5" CornerRadius="6.5">
-                                        <Grid>
-                                            <TextBlock Text="If"
-                                                       FontFamily="Segoe UI Variable Display, Segoe UI"
-                                                       FontSize="15.5"
-                                                       FontWeight="Bold"
-                                                       Foreground="#C6613F"
-                                                       HorizontalAlignment="Center"
-                                                       VerticalAlignment="Center"
-                                                       Margin="-1,-1.5,0,0" />
-                                            <Ellipse Width="4.8" Height="4.8"
-                                                     Fill="#7D8B6A"
-                                                     HorizontalAlignment="Right"
-                                                     VerticalAlignment="Top"
-                                                     Margin="0,3.2,3.2,0" />
-                                        </Grid>
-                                    </Border>
+                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="6,0,0,22">
+                        <Border Width="36" Height="36" CornerRadius="10">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                    <GradientStop Color="#E38667" Offset="0" />
+                                    <GradientStop Color="#BC5736" Offset="1" />
+                                </LinearGradientBrush>
+                            </Border.Background>
+                            <Border Background="#FAF9F5" CornerRadius="6.5" Margin="5.5">
+                                <Grid>
+                                    <TextBlock Text="If" FontFamily="{StaticResource WpSerifFont}" FontSize="15" FontWeight="Bold"
+                                               Foreground="#C6613F" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="-1,-2,0,0" />
+                                    <Ellipse Width="4.5" Height="4.5" Fill="#7D8B6A" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,3,3,0" />
                                 </Grid>
                             </Border>
-                            <StackPanel Margin="11,0,0,0" VerticalAlignment="Center">
-                                <TextBlock Text="Ifboard" FontSize="18" FontWeight="Bold"
-                                           Foreground="{DynamicResource WpTextBrush}" />
-                                <TextBlock Text="Windows 小狼毫伴侣" FontSize="11.5"
-                                           Foreground="{DynamicResource WpMutedBrush}" />
-                            </StackPanel>
-                        </StackPanel>
-
-                        <Border Background="{DynamicResource WpBrandSoftBrush}"
-                                CornerRadius="8" Padding="9,4" Margin="0,12,0,0"
-                                HorizontalAlignment="Left">
-                            <TextBlock x:Name="DeviceBadgeText"
-                                       Text="公开版 v1.2.1"
-                                       FontSize="11.5" FontWeight="SemiBold"
-                                       Foreground="{DynamicResource WpBrandInkBrush}" />
                         </Border>
+                        <StackPanel Margin="11,0,0,0" VerticalAlignment="Center">
+                            <TextBlock Text="Ifboard" FontFamily="{StaticResource WpSerifFont}" FontWeight="Medium" FontSize="19" />
+                            <TextBlock Text="电脑控制中心" FontSize="11.5" Foreground="{DynamicResource WpMutedBrush}" />
+                        </StackPanel>
                     </StackPanel>
 
-                    <!-- 底部快捷部署与系统信息 -->
                     <StackPanel DockPanel.Dock="Bottom" Margin="2,12,2,0">
-                        <Border Height="1" Background="{DynamicResource WpDividerBrush}" Margin="0,0,0,12" />
-                        <Button x:Name="QuickDeployBtn" Style="{StaticResource BrandButtonStyle}"
-                                Content="立即部署小狼毫"
-                                Click="QuickDeploy_Click" />
-                        <Button Style="{StaticResource GhostButtonStyle}"
-                                Margin="0,8,0,0"
-                                Content="最小化至系统托盘"
-                                Click="MinimizeToTray_Click" />
+                        <Button x:Name="QuickDeployBtn" Style="{StaticResource GhostButtonStyle}" Content="重新部署小狼毫"
+                                ToolTip="设置改动会自动部署；改了自定义短语等文件后可手动点这里" Click="QuickDeploy_Click" />
+                        <TextBlock x:Name="DeviceBadgeText" Text="v1.3.4" Margin="4,10,0,0" FontSize="11.5"
+                                   FontFamily="{StaticResource WpMonoFont}" Foreground="{DynamicResource WpMutedBrush}"
+                                   TextTrimming="CharacterEllipsis" />
                     </StackPanel>
 
-                    <!-- 主分组导航 -->
-                    <StackPanel VerticalAlignment="Top">
-                        <RadioButton x:Name="NavSyncRadio" Style="{StaticResource NavTabRadioStyle}"
-                                     AutomationProperties.Name="同步与语法模型"
-                                     GroupName="MainNav" IsChecked="True" Checked="NavTab_Checked">
-                            <StackPanel>
-                                <TextBlock Text="同步与语法模型" FontSize="13.5" FontWeight="SemiBold" />
-                                <TextBlock Text="WebDAV · 备份恢复 · 万象" FontSize="11"
-                                           Foreground="{DynamicResource WpMutedBrush}" Margin="0,2,0,0" />
-                            </StackPanel>
-                        </RadioButton>
-
-                        <RadioButton x:Name="NavInputRadio" Style="{StaticResource NavTabRadioStyle}"
-                                     AutomationProperties.Name="输入与方案"
-                                     GroupName="MainNav" Checked="NavTab_Checked">
-                            <StackPanel>
-                                <TextBlock Text="输入与方案" FontSize="13.5" FontWeight="SemiBold" />
-                                <TextBlock Text="全拼/双拼 · 模糊音 · 热键" FontSize="11"
-                                           Foreground="{DynamicResource WpMutedBrush}" Margin="0,2,0,0" />
-                            </StackPanel>
-                        </RadioButton>
-
-                        <RadioButton x:Name="NavSkinRadio" Style="{StaticResource NavTabRadioStyle}"
-                                     AutomationProperties.Name="外观与皮肤"
-                                     GroupName="MainNav" Checked="NavTab_Checked">
-                            <StackPanel>
-                                <TextBlock Text="外观与皮肤" FontSize="13.5" FontWeight="SemiBold" />
-                                <TextBlock Text="陶土橙 · 系统主体色 · 预览" FontSize="11"
-                                           Foreground="{DynamicResource WpMutedBrush}" Margin="0,2,0,0" />
-                            </StackPanel>
-                        </RadioButton>
-
-                        <RadioButton x:Name="NavAboutRadio" Style="{StaticResource NavTabRadioStyle}"
-                                     AutomationProperties.Name="工具与关于"
-                                     GroupName="MainNav" Checked="NavTab_Checked">
-                            <StackPanel>
-                                <TextBlock Text="工具与关于" FontSize="13.5" FontWeight="SemiBold" />
-                                <TextBlock Text="精简微软拼音 · 数据目录 · 版本" FontSize="11"
-                                           Foreground="{DynamicResource WpMutedBrush}" Margin="0,2,0,0" />
-                            </StackPanel>
-                        </RadioButton>
-                    </StackPanel>
+                    <!-- 导航：当前项背后是一个会滑动的 brand-soft 圆角块 -->
+                    <Grid x:Name="NavHost" VerticalAlignment="Top">
+                        <Border x:Name="NavIndicator" Height="42" CornerRadius="12" VerticalAlignment="Top"
+                                Background="{DynamicResource WpBrandSoftBrush}" IsHitTestVisible="False">
+                            <Border.RenderTransform><TranslateTransform x:Name="NavIndicatorShift" /></Border.RenderTransform>
+                        </Border>
+                        <StackPanel x:Name="NavList">
+                            <RadioButton x:Name="NavCommon" Style="{StaticResource NavItemStyle}" Tag="{StaticResource IconCommon}" Content="常用" IsChecked="True" Checked="NavTab_Checked" />
+                            <RadioButton x:Name="NavKeys" Style="{StaticResource NavItemStyle}" Tag="{StaticResource IconKeys}" Content="按键" Checked="NavTab_Checked" />
+                            <RadioButton x:Name="NavCandidates" Style="{StaticResource NavItemStyle}" Tag="{StaticResource IconCandidates}" Content="候选" Checked="NavTab_Checked" />
+                            <RadioButton x:Name="NavLook" Style="{StaticResource NavItemStyle}" Tag="{StaticResource IconLook}" Content="外观" Checked="NavTab_Checked" />
+                            <RadioButton x:Name="NavSync" Style="{StaticResource NavItemStyle}" Tag="{StaticResource IconSync}" Content="同步" Checked="NavTab_Checked" />
+                            <RadioButton x:Name="NavDict" Style="{StaticResource NavItemStyle}" Tag="{StaticResource IconDict}" Content="词库" Checked="NavTab_Checked" />
+                            <RadioButton x:Name="NavAdvanced" Style="{StaticResource NavItemStyle}" Tag="{StaticResource IconAdvanced}" Content="高级" Checked="NavTab_Checked" />
+                            <RadioButton x:Name="NavAbout" Style="{StaticResource NavItemStyle}" Tag="{StaticResource IconAbout}" Content="关于" Checked="NavTab_Checked" />
+                        </StackPanel>
+                    </Grid>
                 </DockPanel>
             </Border>
 
-            <!-- 右侧内容面板 + 底部状态条 -->
+            <!-- ══════════ 右侧：搜索栏 + 内容 ══════════ -->
             <DockPanel Grid.Column="2" LastChildFill="True">
-                <!-- 底部状态提示横幅 -->
-                <Border DockPanel.Dock="Bottom"
-                        Background="{DynamicResource WpGlassBgBrush}"
-                        BorderBrush="{DynamicResource WpGlassBorderBrush}"
-                        BorderThickness="1"
-                        CornerRadius="14"
-                        Padding="14,10"
-                        Margin="0,12,0,0">
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <Ellipse x:Name="StatusDot" Width="8" Height="8" Margin="0,0,10,0"
-                                 Fill="{DynamicResource WpSageBrush}" VerticalAlignment="Center" />
-                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                            <TextBlock x:Name="StatusBannerText"
-                                       Text="就绪：可在上方调整配置并实时同步。"
-                                       FontSize="12.5"
-                                       Foreground="{DynamicResource WpTextBrush}"
-                                       TextTrimming="CharacterEllipsis" />
-                            <ProgressBar x:Name="GlobalProgressBar"
-                                         Height="4" Margin="0,5,0,0"
-                                         Minimum="0" Maximum="100" Value="0"
-                                         Foreground="{DynamicResource WpBrandBrush}"
-                                         Background="{DynamicResource WpDividerBrush}"
-                                         BorderThickness="0"
-                                         Visibility="Collapsed" />
+                <Grid DockPanel.Dock="Top" Margin="0,0,0,6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBox x:Name="SearchBox" Style="{StaticResource SearchBoxStyle}" Tag="搜索设置，例如 模糊音 / mhy / 皮肤"
+                             TextChanged="SearchBox_TextChanged" PreviewKeyDown="SearchBox_PreviewKeyDown" />
+                    <!-- 状态胶囊：灰 = 空闲，鼠尾草绿 = 正常，琥珀 = 进行中（呼吸闪烁），红 = 出错 -->
+                    <Border x:Name="StatusPill" Grid.Column="1" Margin="10,0,0,0" Height="40" MaxWidth="320"
+                            CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={StaticResource PillRadius}}" Padding="14,0" Background="{DynamicResource WpGlassBgBrush}"
+                            BorderBrush="{DynamicResource WpGlassBorderBrush}" BorderThickness="1">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <Ellipse x:Name="StatusDot" Width="8" Height="8" Fill="{DynamicResource WpSageBrush}" Margin="0,0,9,0" />
+                            <TextBlock x:Name="StatusBannerText" Text="就绪" FontSize="12.5" MaxWidth="270"
+                                       Foreground="{DynamicResource WpTextSecondaryBrush}" TextTrimming="CharacterEllipsis" />
                         </StackPanel>
-                        <TextBlock x:Name="StatusDetailText" Grid.Column="2"
-                                   FontSize="11.5" Margin="12,0,0,0"
-                                   Foreground="{DynamicResource WpMutedBrush}"
-                                   VerticalAlignment="Center" />
-                    </Grid>
-                </Border>
+                    </Border>
+                </Grid>
+                <Grid DockPanel.Dock="Top" Height="10">
+                    <ProgressBar x:Name="GlobalProgressBar" Style="{StaticResource ThinProgressStyle}" Margin="14,0"
+                                 VerticalAlignment="Center" Minimum="0" Maximum="100" Visibility="Collapsed" />
+                    <TextBlock x:Name="StatusDetailText" Visibility="Collapsed" />
+                </Grid>
 
-                <!-- 滚动视图区 -->
-                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
-                              Padding="0,0,6,0">
-                    <Grid>
-                        <!-- ══════════════════ TAB 1：同步与语法模型 ══════════════════ -->
-                        <StackPanel x:Name="PageSync" Visibility="Visible">
-                            <TextBlock Text="云端同步与词库迁移" Style="{StaticResource SectionEyebrowStyle}" />
+                <ScrollViewer x:Name="ContentScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                              Padding="0,8,8,0" Focusable="False">
+                    <Grid x:Name="PagesHost">
+                        <TextBlock x:Name="SearchEmptyText" Visibility="Collapsed" Margin="4,40,0,0"
+                                   Style="{StaticResource PageTitleStyle}" FontSize="20" Foreground="{DynamicResource WpMutedBrush}"
+                                   Text="没有找到相关设置" />
 
-                            <!-- 可选历史凭据快速导入提示条 -->
-                            <Border x:Name="LegacyImportBanner"
-                                    Style="{StaticResource GlassCardStyle}"
-                                    Background="{DynamicResource WpBrandSoftBrush}"
-                                    BorderBrush="{DynamicResource WpBrandBrush}"
-                                    Visibility="Collapsed"
-                                    Padding="14,9">
+                        <!-- ══════════ 常用 ══════════ -->
+                        <StackPanel x:Name="PageCommon">
+                            <TextBlock x:Name="CommonHeader" Text="常用" Style="{StaticResource PageTitleStyle}" />
+                            <TextBlock Text="输入方案与默认状态。改动会自动保存，约 1 秒后部署生效。" Style="{StaticResource PageSubtitleStyle}" />
+
+                            <TextBlock Text="输入方案" Style="{StaticResource CardTitleStyle}" />
+                            <Border Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <theme:SettingRow Title="默认中文方案" Hint="打开输入法时用哪一套方案。" Keywords="全拼 双拼 小鹤 雾凇 schema">
+                                        <Border Style="{StaticResource SegmentHostStyle}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <RadioButton x:Name="SchemaRimeIceRadio" Style="{StaticResource SegmentRadioStyle}" GroupName="PrimarySchema" Content="雾凇全拼" Checked="RimeControl_Changed" />
+                                                <RadioButton x:Name="SchemaFlypyRadio" Style="{StaticResource SegmentRadioStyle}" GroupName="PrimarySchema" Content="小鹤双拼" Checked="RimeControl_Changed" />
+                                            </StackPanel>
+                                        </Border>
+                                    </theme:SettingRow>
+                                    <theme:SettingRow Title="同时保留全拼和小鹤双拼" Hint="打开后，按 F4 或 Ctrl+` 可以临时换到另一套方案。" Keywords="切换方案 F4">
+                                        <CheckBox x:Name="KeepBothSchemasCheck" Style="{StaticResource PillSwitchStyle}" Checked="RimeControl_Changed" Unchecked="RimeControl_Changed" />
+                                    </theme:SettingRow>
+                                    <theme:SettingRow Title="中文输入默认用英文标点" Hint="关闭时打出 ，。？；打开后默认打出 , . ?。随时可按 Ctrl+. 临时切换。" Keywords="标点 半角 全角 符号">
+                                        <CheckBox x:Name="AsciiPunctDefaultCheck" Style="{StaticResource PillSwitchStyle}" Checked="RimeControl_Changed" Unchecked="RimeControl_Changed" />
+                                    </theme:SettingRow>
+                                </StackPanel>
+                            </Border>
+
+                            <TextBlock Text="整句输入" Style="{StaticResource CardTitleStyle}" />
+                            <Border Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <theme:SettingRow Title="用万象语法模型排序整句" Hint="打开后，长句和双拼的首选更准。需要先在「词库」页下载模型。" Keywords="语法模型 万象 gram 长句 预测">
+                                        <CheckBox x:Name="GrammarEnabledCheck" Style="{StaticResource PillSwitchStyle}" Checked="RimeControl_Changed" Unchecked="RimeControl_Changed" />
+                                    </theme:SettingRow>
+                                    <theme:SettingRow Title="语法模型" Hint="" Keywords="模型状态">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Border x:Name="CommonGrammarBadge" Style="{StaticResource BadgeStyle}">
+                                                <TextBlock x:Name="CommonGrammarBadgeText" Text="检测中" FontSize="12" />
+                                            </Border>
+                                            <Button Style="{StaticResource TextButtonStyle}" Content="管理 ›" Margin="6,0,0,0" Click="GoDictPage_Click" />
+                                        </StackPanel>
+                                    </theme:SettingRow>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+
+                        <!-- ══════════ 按键 ══════════ -->
+                        <StackPanel x:Name="PageKeys" Visibility="Collapsed">
+                            <TextBlock Text="按键" Style="{StaticResource PageTitleStyle}" />
+                            <TextBlock Text="中英切换、翻页和编辑用的按键。" Style="{StaticResource PageSubtitleStyle}" />
+
+                            <TextBlock Text="中英切换" Style="{StaticResource CardTitleStyle}" />
+                            <Border Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <theme:SettingRow Title="只用 Ctrl+Space 切换中英文" Hint="打开后，单按 Shift 不再切到英文，写代码、全选时不会误触。" Keywords="shift 误触 中英文 切换键">
+                                        <CheckBox x:Name="CtrlSpaceOnlyCheck" Style="{StaticResource PillSwitchStyle}" Checked="RimeControl_Changed" Unchecked="RimeControl_Changed" />
+                                    </theme:SettingRow>
+                                    <theme:SettingRow Title="切换时在光标旁提示「中 / 英」" Hint="切换中英文时，光标旁短暂弹出一个小图标。" Keywords="浮动提示 图标 show_notifications">
+                                        <CheckBox x:Name="ShowAsciiSwitchTipCheck" Style="{StaticResource PillSwitchStyle}" Click="ImeIconSetting_Click" />
+                                    </theme:SettingRow>
+                                </StackPanel>
+                            </Border>
+
+                            <TextBlock Text="翻页与编辑" Style="{StaticResource CardTitleStyle}" />
+                            <Border Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <theme:SettingRow Title="用 Tab 向后翻页" Hint="候选窗弹出时按 Tab 翻到下一页，Shift+Tab 回上一页。" Keywords="翻页 tab">
+                                        <CheckBox x:Name="TabPageFlipCheck" Style="{StaticResource PillSwitchStyle}" Checked="RimeControl_Changed" Unchecked="RimeControl_Changed" />
+                                    </theme:SettingRow>
+                                    <theme:SettingRow Title="英文模式下「.」「,」后自动加空格" Hint="接着打下一个单词时自动补空格；3.14、1,000、e.g.、网址和句末回车不受影响。" Keywords="空格 英文 句点 逗号 autospace">
+                                        <CheckBox x:Name="AsciiAutoSpaceCheck" Style="{StaticResource PillSwitchStyle}" Checked="RimeControl_Changed" Unchecked="RimeControl_Changed" />
+                                    </theme:SettingRow>
+                                </StackPanel>
+                            </Border>
+
+                            <TextBlock Text="快捷键一览" Style="{StaticResource CardTitleStyle}" />
+                            <Border Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <theme:SettingRow Title="切换中英文" Keywords="快捷键 ctrl space">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Border Style="{StaticResource KeyCapStyle}"><TextBlock Text="Ctrl" Style="{StaticResource KeyCapTextStyle}" /></Border>
+                                            <Border Style="{StaticResource KeyCapStyle}"><TextBlock Text="Space" Style="{StaticResource KeyCapTextStyle}" /></Border>
+                                        </StackPanel>
+                                    </theme:SettingRow>
+                                    <theme:SettingRow Title="切换中英文标点" Keywords="快捷键 标点">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Border Style="{StaticResource KeyCapStyle}"><TextBlock Text="Ctrl" Style="{StaticResource KeyCapTextStyle}" /></Border>
+                                            <Border Style="{StaticResource KeyCapStyle}"><TextBlock Text="." Style="{StaticResource KeyCapTextStyle}" /></Border>
+                                        </StackPanel>
+                                    </theme:SettingRow>
+                                    <theme:SettingRow Title="打开方案选单" Keywords="快捷键 方案 菜单">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Border Style="{StaticResource KeyCapStyle}"><TextBlock Text="F4" Style="{StaticResource KeyCapTextStyle}" /></Border>
+                                            <TextBlock Text="或" Margin="2,0,7,0" VerticalAlignment="Center" Foreground="{DynamicResource WpMutedBrush}" />
+                                            <Border Style="{StaticResource KeyCapStyle}"><TextBlock Text="Ctrl" Style="{StaticResource KeyCapTextStyle}" /></Border>
+                                            <Border Style="{StaticResource KeyCapStyle}"><TextBlock Text="`" Style="{StaticResource KeyCapTextStyle}" /></Border>
+                                        </StackPanel>
+                                    </theme:SettingRow>
+                                    <theme:SettingRow Title="删除前一个音节" Keywords="快捷键 退格 音节">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Border Style="{StaticResource KeyCapStyle}"><TextBlock Text="Ctrl" Style="{StaticResource KeyCapTextStyle}" /></Border>
+                                            <Border Style="{StaticResource KeyCapStyle}"><TextBlock Text="Backspace" Style="{StaticResource KeyCapTextStyle}" /></Border>
+                                        </StackPanel>
+                                    </theme:SettingRow>
+                                    <theme:SettingRow Title="全选正在输入的拼音" Hint="打拼音时第一次按 Ctrl+A 只选中拼音，按退格一次删光；再按一次 Ctrl+A 是正常全选。Ctrl+Z 撤回拼音并关掉候选窗。" Keywords="快捷键 全选 删除 拼音 清空 撤回 撤销 ctrl+z">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Border Style="{StaticResource KeyCapStyle}"><TextBlock Text="Ctrl" Style="{StaticResource KeyCapTextStyle}" /></Border>
+                                            <Border Style="{StaticResource KeyCapStyle}"><TextBlock Text="A" Style="{StaticResource KeyCapTextStyle}" /></Border>
+                                            <TextBlock Text="→" Margin="2,0,7,0" VerticalAlignment="Center" Foreground="{DynamicResource WpMutedBrush}" />
+                                            <Border Style="{StaticResource KeyCapStyle}" Margin="0"><TextBlock Text="Backspace" Style="{StaticResource KeyCapTextStyle}" /></Border>
+                                        </StackPanel>
+                                    </theme:SettingRow>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+
+                        <!-- ══════════ 候选 ══════════ -->
+                        <StackPanel x:Name="PageCandidates" Visibility="Collapsed">
+                            <TextBlock Text="候选" Style="{StaticResource PageTitleStyle}" />
+                            <TextBlock Text="候选个数、模糊音与纠错。上方预览会跟着变化。" Style="{StaticResource PageSubtitleStyle}" />
+
+                            <Border x:Name="CandPreviewHost" Style="{StaticResource CardStyle}" Padding="18,16" />
+
+                            <TextBlock Text="候选" Style="{StaticResource CardTitleStyle}" />
+                            <Border Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <theme:SettingRow Title="每页候选个数" Hint="5 个更紧凑；重码多时可以调到 7 或 9。" Keywords="候选数 页 个数 page_size">
+                                        <Border Style="{StaticResource SegmentHostStyle}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <RadioButton x:Name="PageSize5Radio" Style="{StaticResource SegmentRadioStyle}" GroupName="PageSize" Content="5" FontFamily="{StaticResource WpMonoFont}" Checked="RimeControl_Changed" />
+                                                <RadioButton x:Name="PageSize7Radio" Style="{StaticResource SegmentRadioStyle}" GroupName="PageSize" Content="7" FontFamily="{StaticResource WpMonoFont}" Checked="RimeControl_Changed" />
+                                                <RadioButton x:Name="PageSize9Radio" Style="{StaticResource SegmentRadioStyle}" GroupName="PageSize" Content="9" FontFamily="{StaticResource WpMonoFont}" Checked="RimeControl_Changed" />
+                                            </StackPanel>
+                                        </Border>
+                                    </theme:SettingRow>
+                                    <theme:SettingRow Title="拼写纠错" Hint="打开后，按错邻键时也会猜出想打的词，但可能把不想要的词排到前面。" Keywords="纠错 容错 enable_correction 智能纠错">
+                                        <CheckBox x:Name="EnableCorrectionCheck" Style="{StaticResource PillSwitchStyle}" Checked="RimeControl_Changed" Unchecked="RimeControl_Changed" />
+                                    </theme:SettingRow>
+                                    <theme:SettingRow Title="小鹤双拼显示按下的字母" Hint="打开后，输入栏显示 ui、dk 这样的双拼字母，不展开成全拼。" Keywords="双拼 编码 预编辑 preedit">
+                                        <CheckBox x:Name="KeepRawFlypyCheck" Style="{StaticResource PillSwitchStyle}" Checked="RimeControl_Changed" Unchecked="RimeControl_Changed" />
+                                    </theme:SettingRow>
+                                </StackPanel>
+                            </Border>
+
+                            <TextBlock Text="模糊音" Style="{StaticResource CardTitleStyle}" />
+                            <Border Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <theme:SettingRow Title="分不清的音" Hint="选中后两边互通，例如选了第一项，输入 zi 也能打出 zhi。" Keywords="模糊音 平翘舌 前后鼻音 zh ch sh en eng in ing" Stacked="True">
+                                        <WrapPanel>
+                                            <CheckBox x:Name="FuzzyZhChShCheck" Style="{StaticResource ChipCheckStyle}" Content="z = zh · c = ch · s = sh" Checked="RimeControl_Changed" Unchecked="RimeControl_Changed" />
+                                            <CheckBox x:Name="FuzzyEnEngCheck" Style="{StaticResource ChipCheckStyle}" Content="en = eng" Checked="RimeControl_Changed" Unchecked="RimeControl_Changed" />
+                                            <CheckBox x:Name="FuzzyInIngCheck" Style="{StaticResource ChipCheckStyle}" Content="in = ing" Checked="RimeControl_Changed" Unchecked="RimeControl_Changed" />
+                                        </WrapPanel>
+                                    </theme:SettingRow>
+                                </StackPanel>
+                            </Border>
+
+                            <TextBlock Text="试打" Style="{StaticResource CardTitleStyle}" />
+                            <Border Style="{StaticResource CardStyle}" Padding="18,16">
+                                <TextBox x:Name="TryBox" Style="{StaticResource WarmTextBoxStyle}" ToolTip="改完设置后，等状态显示「已生效」再试" />
+                            </Border>
+                        </StackPanel>
+
+                        <!-- ══════════ 外观 ══════════ -->
+                        <StackPanel x:Name="PageLook" Visibility="Collapsed">
+                            <TextBlock Text="外观" Style="{StaticResource PageTitleStyle}" />
+                            <TextBlock Text="候选窗皮肤与排版，以及这个窗口的深浅色。" Style="{StaticResource PageSubtitleStyle}" />
+
+                            <Border x:Name="LookPreviewHost" Style="{StaticResource CardStyle}" Padding="18,16" />
+
+                            <TextBlock Text="候选窗皮肤" Style="{StaticResource CardTitleStyle}" />
+                            <Border Style="{StaticResource CardStyle}" Padding="18,16,18,6">
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal">
+                                        <RadioButton x:Name="SkinTerracottaRadio" Style="{StaticResource SkinCardStyle}" GroupName="SkinPreset" Checked="SkinControl_Changed" />
+                                        <RadioButton x:Name="SkinSystemAccentRadio" Style="{StaticResource SkinCardStyle}" GroupName="SkinPreset" Checked="SkinControl_Changed" />
+                                        <RadioButton x:Name="SkinAmberRadio" Style="{StaticResource SkinCardStyle}" GroupName="SkinPreset" Checked="SkinControl_Changed" />
+                                    </StackPanel>
+                                    <theme:SettingRow Title="Windows 主体色" Hint="「跟随系统」皮肤使用的颜色。" Keywords="强调色 accent 取色 主题色" ShowSeparator="False" Margin="0,8,0,0">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Ellipse x:Name="AccentSwatchDot" Width="14" Height="14" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                            <TextBlock x:Name="AccentHexText" Text="#D97757" FontFamily="{StaticResource WpMonoFont}" FontSize="12.5"
+                                                       VerticalAlignment="Center" Foreground="{DynamicResource WpTextSecondaryBrush}" />
+                                            <Button Style="{StaticResource GhostButtonStyle}" Content="重新取色" Margin="12,0,0,0" Click="RefreshSystemColor_Click" />
+                                        </StackPanel>
+                                    </theme:SettingRow>
+                                </StackPanel>
+                            </Border>
+
+                            <TextBlock Text="排版" Style="{StaticResource CardTitleStyle}" />
+                            <Border Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <theme:SettingRow Title="间距" Hint="紧凑适合高分屏；舒适留白更多。" Keywords="密度 紧凑 舒适 density">
+                                        <Border Style="{StaticResource SegmentHostStyle}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <RadioButton x:Name="DensityCompactRadio" Style="{StaticResource SegmentRadioStyle}" GroupName="Density" Content="紧凑" Checked="SkinControl_Changed" />
+                                                <RadioButton x:Name="DensityStandardRadio" Style="{StaticResource SegmentRadioStyle}" GroupName="Density" Content="舒适" Checked="SkinControl_Changed" />
+                                            </StackPanel>
+                                        </Border>
+                                    </theme:SettingRow>
+                                    <theme:SettingRow Title="候选字号" Hint="编号和注释会自动小 1 号。" Keywords="字号 字体大小 font">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Button x:Name="FontMinusBtn" Style="{StaticResource StepperButtonStyle}" Content="−" Click="FontStep_Click" />
+                                            <TextBlock x:Name="FontValueText" Text="12 pt" Width="58" TextAlignment="Center" VerticalAlignment="Center"
+                                                       FontFamily="{StaticResource WpMonoFont}" FontSize="13.5" />
+                                            <Button x:Name="FontPlusBtn" Style="{StaticResource StepperButtonStyle}" Content="+" Click="FontStep_Click" />
+                                        </StackPanel>
+                                    </theme:SettingRow>
+                                    <theme:SettingRow Title="候选窗圆角" Hint="高亮候选的圆角会自动小 2 px，看起来是同心的。" Keywords="圆角 半径 radius">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Slider x:Name="CornerSlider" Width="160" Minimum="0" Maximum="14" IsSnapToTickEnabled="True" TickFrequency="1"
+                                                    ValueChanged="SkinSlider_ValueChanged" />
+                                            <TextBlock x:Name="CornerValueText" Text="7 px" Width="48" TextAlignment="Right" VerticalAlignment="Center"
+                                                       FontFamily="{StaticResource WpMonoFont}" FontSize="13" />
+                                        </StackPanel>
+                                    </theme:SettingRow>
+                                </StackPanel>
+                            </Border>
+
+                            <TextBlock Text="系统" Style="{StaticResource CardTitleStyle}" />
+                            <Border Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <theme:SettingRow Title="皮肤跟着 Windows 主体色自动更新" Hint="选「跟随系统」皮肤时，换壁纸或深浅色后候选窗自动改色。" Keywords="自动 主体色 壁纸 跟随">
+                                        <CheckBox x:Name="AutoAccentTrayCheck" Style="{StaticResource PillSwitchStyle}" Checked="SkinControl_Changed" Unchecked="SkinControl_Changed" />
+                                    </theme:SettingRow>
+                                    <theme:SettingRow Title="任务栏显示「中 / 英」图标" Hint="控制任务栏右下角的输入指示器。" Keywords="任务栏 托盘 图标 指示器">
+                                        <CheckBox x:Name="ShowTaskbarImeIconCheck" Style="{StaticResource PillSwitchStyle}" Click="ImeIconSetting_Click" />
+                                    </theme:SettingRow>
+                                </StackPanel>
+                            </Border>
+
+                            <TextBlock Text="这个窗口" Style="{StaticResource CardTitleStyle}" />
+                            <Border Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <theme:SettingRow Title="深浅色" Hint="默认跟随 Windows。" Keywords="深色 浅色 暗色 夜间 主题 dark">
+                                        <Border Style="{StaticResource SegmentHostStyle}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <RadioButton x:Name="UiAutoRadio" Style="{StaticResource SegmentRadioStyle}" GroupName="UiMode" Content="跟随系统" Checked="UiModeRadio_Checked" />
+                                                <RadioButton x:Name="UiLightRadio" Style="{StaticResource SegmentRadioStyle}" GroupName="UiMode" Content="浅色" Checked="UiModeRadio_Checked" />
+                                                <RadioButton x:Name="UiDarkRadio" Style="{StaticResource SegmentRadioStyle}" GroupName="UiMode" Content="深色" Checked="UiModeRadio_Checked" />
+                                            </StackPanel>
+                                        </Border>
+                                    </theme:SettingRow>
+                                    <theme:SettingRow Title="背景色晕缓慢流动" Hint="关掉后背景保持静止，更省电。" Keywords="动画 背景 流动 色晕">
+                                        <CheckBox x:Name="AnimatedGlowCheck" Style="{StaticResource PillSwitchStyle}" Click="AnimatedGlow_Click" />
+                                    </theme:SettingRow>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+
+                        <!-- ══════════ 同步 ══════════ -->
+                        <StackPanel x:Name="PageSync" Visibility="Collapsed">
+                            <TextBlock Text="同步" Style="{StaticResource PageTitleStyle}" />
+                            <TextBlock Text="和手机 Ifboard 共用一个网盘目录，同步词频、造词、电脑配置与剪贴板。" Style="{StaticResource PageSubtitleStyle}" />
+
+                            <Border x:Name="LegacyImportBanner" Style="{StaticResource NoteBoxStyle}" Visibility="Collapsed" Margin="0,0,0,16">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel VerticalAlignment="Center">
-                                        <TextBlock Text="检测到本机历史 webdav_config.json" FontWeight="SemiBold" FontSize="13"
-                                                   Foreground="{DynamicResource WpBrandInkBrush}" />
-                                        <TextBlock Text="可一键读取原有服务器与账号信息，并转存为本机 DPAPI 加密凭据。"
-                                                   FontSize="12" Foreground="{DynamicResource WpTextSecondaryBrush}" Margin="0,2,12,0" />
+                                        <TextBlock Text="发现旧版的 webdav_config.json" FontWeight="SemiBold" FontSize="13" />
+                                        <TextBlock Text="可以一键填入原来的服务器和账号，并改用本机加密保存。" Style="{StaticResource HintTextStyle}" />
                                     </StackPanel>
-                                    <Button Grid.Column="1" Style="{StaticResource BrandButtonStyle}"
-                                            Content="一键填入" Click="ImportLegacyWebDav_Click" />
+                                    <Button Grid.Column="1" Style="{StaticResource BrandButtonStyle}" Content="一键填入" Click="ImportLegacyWebDav_Click" />
                                 </Grid>
                             </Border>
 
-                            <!-- WebDAV 配置卡 -->
-                            <Border Style="{StaticResource GlassCardStyle}">
+                            <Grid>
+                                <TextBlock Text="网盘账号（WebDAV）" Style="{StaticResource CardTitleStyle}" />
+                                <Border Style="{StaticResource BadgeStyle}" HorizontalAlignment="Right" Margin="0,0,0,8" Background="{DynamicResource WpGlassBgBrush}">
+                                    <TextBlock x:Name="LastSyncText" Text="尚未同步" FontSize="12" FontFamily="{StaticResource WpMonoFont}" Foreground="{DynamicResource WpTextSecondaryBrush}" />
+                                </Border>
+                            </Grid>
+                            <Border Style="{StaticResource CardStyle}" Padding="18,6,18,16">
                                 <StackPanel>
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock Text="WebDAV 多设备词库同步" FontSize="15.5" FontWeight="Bold" />
-                                            <TextBlock Text="与手机端 Ifboard 共用同一云端结构，双向同步用户词频、造词与电脑整套个人配置。账号密码使用 Windows DPAPI 硬件级加密保存在本机。"
-                                                       Style="{StaticResource RowDescStyle}" Margin="0,4,12,0" />
-                                        </StackPanel>
-                                        <Border Grid.Column="1" Background="{DynamicResource WpCardSubtleBrush}"
-                                                BorderBrush="{DynamicResource WpBorderStrongBrush}" BorderThickness="1"
-                                                CornerRadius="10" Padding="10,6" VerticalAlignment="Top">
-                                            <TextBlock x:Name="LastSyncText" Text="上次同步：尚未同步"
-                                                       FontSize="11.5" Foreground="{DynamicResource WpTextSecondaryBrush}" />
+                                    <theme:SettingRow Title="网盘服务商" Hint="Koofr 国内外都稳定；也可以用坚果云或自建 Nextcloud。" Keywords="webdav koofr 坚果云 nextcloud 服务器" ShowSeparator="False">
+                                        <Border Style="{StaticResource SegmentHostStyle}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <RadioButton x:Name="ProviderKoofrRadio" Style="{StaticResource SegmentRadioStyle}" GroupName="WebDavProvider" Content="Koofr" Checked="ProviderRadio_Checked" />
+                                                <RadioButton x:Name="ProviderJgyRadio" Style="{StaticResource SegmentRadioStyle}" GroupName="WebDavProvider" Content="坚果云" Checked="ProviderRadio_Checked" />
+                                                <RadioButton x:Name="ProviderCustomRadio" Style="{StaticResource SegmentRadioStyle}" GroupName="WebDavProvider" Content="自定义" Checked="ProviderRadio_Checked" />
+                                            </StackPanel>
                                         </Border>
-                                    </Grid>
-
-                                    <Border Style="{StaticResource CardDividerStyle}" />
-
-                                    <TextBlock Text="云盘服务商" Style="{StaticResource RowTitleStyle}" />
-                                    <TextBlock Text="默认推荐 Koofr（国内外稳定支持 WebDAV 应用密码），也可一键切换至坚果云或自定义 Nextcloud。"
-                                               Style="{StaticResource RowDescStyle}" Margin="0,2,0,8" />
-                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                                        <RadioButton x:Name="ProviderKoofrRadio" Style="{StaticResource ChipRadioStyle}"
-                                                     GroupName="WebDavProvider" Content="Koofr（默认）"
-                                                     Checked="ProviderRadio_Checked" />
-                                        <RadioButton x:Name="ProviderJgyRadio" Style="{StaticResource ChipRadioStyle}"
-                                                     GroupName="WebDavProvider" Content="坚果云"
-                                                     Checked="ProviderRadio_Checked" />
-                                        <RadioButton x:Name="ProviderCustomRadio" Style="{StaticResource ChipRadioStyle}"
-                                                     GroupName="WebDavProvider" Content="自定义"
-                                                     Checked="ProviderRadio_Checked" />
-                                    </StackPanel>
-
-                                    <Grid>
+                                    </theme:SettingRow>
+                                    <Grid Margin="0,6,0,0">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="14" />
-                                            <ColumnDefinition Width="180" />
+                                            <ColumnDefinition Width="170" />
                                         </Grid.ColumnDefinitions>
-                                        <StackPanel Grid.Column="0">
-                                            <TextBlock Text="WebDAV 服务器地址" FontSize="12" Foreground="{DynamicResource WpTextSecondaryBrush}" Margin="0,0,0,4" />
-                                            <TextBox x:Name="DavUrlBox" Style="{StaticResource WarmTextBoxStyle}"
-                                                     TextChanged="DavField_TextChanged" />
+                                        <StackPanel>
+                                            <TextBlock Text="服务器地址" Style="{StaticResource FieldLabelStyle}" />
+                                            <TextBox x:Name="DavUrlBox" Style="{StaticResource WarmTextBoxStyle}" FontFamily="{StaticResource WpMonoFont}" FontSize="12.5" TextChanged="DavField_TextChanged" />
                                         </StackPanel>
                                         <StackPanel Grid.Column="2">
-                                            <TextBlock Text="云端同步目录名" FontSize="12" Foreground="{DynamicResource WpTextSecondaryBrush}" Margin="0,0,0,4" />
+                                            <TextBlock Text="网盘里的目录名" Style="{StaticResource FieldLabelStyle}" />
                                             <TextBox x:Name="DavDirBox" Style="{StaticResource WarmTextBoxStyle}" />
                                         </StackPanel>
                                     </Grid>
-
-                                    <Grid Margin="0,10,0,0">
+                                    <Grid Margin="0,12,0,0">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="14" />
                                             <ColumnDefinition Width="*" />
                                         </Grid.ColumnDefinitions>
-                                        <StackPanel Grid.Column="0">
-                                            <TextBlock Text="账号（邮箱）" FontSize="12" Foreground="{DynamicResource WpTextSecondaryBrush}" Margin="0,0,0,4" />
+                                        <StackPanel>
+                                            <TextBlock Text="账号（邮箱）" Style="{StaticResource FieldLabelStyle}" />
                                             <TextBox x:Name="DavUserBox" Style="{StaticResource WarmTextBoxStyle}" />
                                         </StackPanel>
                                         <StackPanel Grid.Column="2">
-                                            <TextBlock Text="应用专用密码（非登录密码）" FontSize="12" Foreground="{DynamicResource WpTextSecondaryBrush}" Margin="0,0,0,4" />
+                                            <TextBlock Text="应用专用密码（不是登录密码）" Style="{StaticResource FieldLabelStyle}" />
                                             <Grid>
-                                                <PasswordBox x:Name="DavPassBox" Style="{StaticResource WarmPasswordBoxStyle}"
-                                                             Padding="10,7,46,7" />
-                                                <TextBox x:Name="DavPassVisibleBox" Style="{StaticResource WarmTextBoxStyle}"
-                                                         Padding="10,7,46,7" Visibility="Collapsed" />
-                                                <Button Content="显示" x:Name="TogglePassBtn"
-                                                        HorizontalAlignment="Right" VerticalAlignment="Center"
-                                                        Margin="0,0,6,0" Padding="8,3"
-                                                        FontSize="11" Style="{StaticResource GhostButtonStyle}"
-                                                        Click="TogglePassword_Click" />
+                                                <PasswordBox x:Name="DavPassBox" Style="{StaticResource WarmPasswordBoxStyle}" Padding="11,8,64,8" />
+                                                <TextBox x:Name="DavPassVisibleBox" Style="{StaticResource WarmTextBoxStyle}" Padding="11,8,64,8" Visibility="Collapsed" />
+                                                <Button x:Name="TogglePassBtn" Content="显示" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                        Margin="0,0,5,0" MinHeight="28" Padding="12,0" FontSize="12"
+                                                        Style="{StaticResource TextButtonStyle}" Click="TogglePassword_Click" />
                                             </Grid>
                                         </StackPanel>
                                     </Grid>
-
-                                    <WrapPanel Margin="0,12,0,0">
-                                        <Button x:Name="SyncNowBtn" Style="{StaticResource BrandButtonStyle}"
-                                                Content="立即双向同步词库"
-                                                Margin="0,0,8,6"
-                                                Click="SyncNow_Click" />
-                                        <Button x:Name="TestDavBtn" Style="{StaticResource GhostButtonStyle}"
-                                                Content="保存并测试连接"
-                                                Margin="0,0,8,6"
-                                                Click="TestWebDav_Click" />
-                                        <Button x:Name="RestoreProfileBtn" Style="{StaticResource GhostButtonStyle}"
-                                                Content="从 WebDAV 一键恢复个人配置与词库"
-                                                Margin="0,0,8,6"
-                                                Click="RestoreProfile_Click" />
-                                        <Button x:Name="BackupProfileBtn" Style="{StaticResource GhostButtonStyle}"
-                                                Content="备份个人配置到 WebDAV"
-                                                Margin="0,0,0,6"
-                                                Click="BackupProfile_Click" />
-                                    </WrapPanel>
-
-                                    <Border Style="{StaticResource CardDividerStyle}" />
-
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock Text="每日自动云端同步（间隔 24 小时）" Style="{StaticResource RowTitleStyle}" />
-                                            <TextBlock Text="驻留托盘期间每 24 小时静默同步一次各设备 Rime 词频与手机触摸习惯（与手机端每日自动同步一致）。"
-                                                       Style="{StaticResource RowDescStyle}" />
-                                        </StackPanel>
-                                        <CheckBox x:Name="DailyAutoSyncCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
-                                                  Checked="AppOptionCheck_Changed" Unchecked="AppOptionCheck_Changed" />
-                                    </Grid>
-
-                                    <Border Style="{StaticResource CardDividerStyle}" />
-
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock Text="剪贴板同步（手机 ⇄ 电脑）" Style="{StaticResource RowTitleStyle}" />
-                                            <TextBlock Text="复制的文字与图片在手机和电脑之间自动同步：同一网络下局域网直连（约 0.1 秒），不在一起时经 WebDAV 中转。内容用上方 WebDAV 账号密码推导的密钥端到端加密，网盘与局域网里都只有密文。两端需填写同一 WebDAV 账号，并在手机键盘左上角菜单中同样开启。"
-                                                       Style="{StaticResource RowDescStyle}" />
-                                            <TextBlock x:Name="ClipSyncStatusText" Text="未开启" Style="{StaticResource RowDescStyle}" Margin="0,4,0,0" />
-                                        </StackPanel>
-                                        <CheckBox x:Name="ClipboardSyncCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
-                                                  Click="ClipboardSyncCheck_Click" />
-                                    </Grid>
-                                </StackPanel>
-                            </Border>
-
-                            <!-- 万象语法模型 LTS 卡片 -->
-                            <TextBlock Text="中文长句上下文预测（N-gram）" Style="{StaticResource SectionEyebrowStyle}" />
-                            <Border Style="{StaticResource GlassCardStyle}">
-                                <StackPanel>
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock Text="万象语法模型（wanxiang-lts-zh-hans.gram）" FontSize="15.5" FontWeight="Bold" />
-                                            <TextBlock Text="约 398 MB 的 Rime 中文语言模型。安装后可显著提升整句长拼音与小鹤双拼的首选命中率；支持官方 LTS 仓库一键更新与断点续传。"
-                                                       Style="{StaticResource RowDescStyle}" Margin="0,4,12,0" />
-                                        </StackPanel>
-                                        <Border Grid.Column="1" x:Name="GrammarBadge"
-                                                Background="{DynamicResource WpSageSoftBrush}"
-                                                CornerRadius="10" Padding="10,6" VerticalAlignment="Top">
-                                            <TextBlock x:Name="GrammarBadgeText" Text="检测中..."
-                                                       FontSize="11.5" FontWeight="SemiBold"
-                                                       Foreground="{DynamicResource WpSageBrush}" />
-                                        </Border>
-                                    </Grid>
-
-                                    <Border Style="{StaticResource CardDividerStyle}" />
-
-                                    <TextBlock x:Name="GrammarDetailText"
-                                               Text="本地模型状态加载中..."
-                                               FontSize="12.5" Foreground="{DynamicResource WpTextSecondaryBrush}"
-                                               TextWrapping="Wrap" Margin="0,0,0,12" />
-
+                                    <Border Style="{StaticResource NoteBoxStyle}">
+                                        <TextBlock Style="{StaticResource HintTextStyle}" Foreground="{DynamicResource WpTextSecondaryBrush}"
+                                                   Text="账号密码只用 Windows 加密保存在这台电脑上。词库和剪贴板会上传到你自己的网盘；剪贴板内容先在本机加密，网盘里只有密文。" />
+                                    </Border>
                                     <WrapPanel>
-                                        <Button x:Name="CheckGrammarBtn" Style="{StaticResource GhostButtonStyle}"
-                                                Content="检查云端 LTS 版本" Margin="0,0,8,4"
-                                                Click="CheckGrammar_Click" />
-                                        <Button x:Name="DownloadGrammarBtn" Style="{StaticResource BrandButtonStyle}"
-                                                Content="下载 / 更新语法模型" Margin="0,0,8,4"
-                                                Click="DownloadGrammar_Click" />
-                                        <Button x:Name="CancelGrammarBtn" Style="{StaticResource GhostButtonStyle}"
-                                                Content="暂停并保留断点缓存" Margin="0,0,8,4"
-                                                Visibility="Collapsed"
-                                                Click="CancelGrammar_Click" />
-                                        <Button x:Name="DeleteGrammarBtn" Style="{StaticResource GhostButtonStyle}"
-                                                Content="卸载模型" Margin="0,0,0,4"
-                                                Foreground="{DynamicResource WpErrorBrush}"
-                                                Click="DeleteGrammar_Click" />
+                                        <Button x:Name="TestDavBtn" Style="{StaticResource BrandButtonStyle}" Content="保存并测试连接" Margin="0,0,8,0" Click="TestWebDav_Click" />
                                     </WrapPanel>
                                 </StackPanel>
                             </Border>
-                        </StackPanel>
 
-                        <!-- ══════════════════ TAB 2：输入与方案 ══════════════════ -->
-                        <StackPanel x:Name="PageInput" Visibility="Collapsed">
-                            <TextBlock Text="默认方案与打字行为" Style="{StaticResource SectionEyebrowStyle}" />
-
-                            <Border Style="{StaticResource GlassCardStyle}">
+                            <TextBlock Text="词库与配置" Style="{StaticResource CardTitleStyle}" />
+                            <Border Style="{StaticResource CardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="默认中文输入方案" Style="{StaticResource RowTitleStyle}" />
-                                    <TextBlock Text="公开版默认启用「雾凇全拼」，老用户也可随时切回「小鹤双拼」或从 WebDAV 恢复全套方案。"
-                                               Style="{StaticResource RowDescStyle}" Margin="0,3,0,10" />
-                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                                        <RadioButton x:Name="SchemaRimeIceRadio" Style="{StaticResource ChipRadioStyle}"
-                                                     GroupName="PrimarySchema" Content="雾凇全拼（公开版默认）"
-                                                     Checked="InputControl_Changed" />
-                                        <RadioButton x:Name="SchemaFlypyRadio" Style="{StaticResource ChipRadioStyle}"
-                                                     GroupName="PrimarySchema" Content="小鹤双拼（双拼高手推荐）"
-                                                     Checked="InputControl_Changed" />
-                                    </StackPanel>
-
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock Text="在选单中同时保留「全拼 + 小鹤双拼」" Style="{StaticResource RowTitleStyle}" />
-                                            <TextBlock Text="开启后可在任意输入框按 F4 或 Ctrl+` 临时切换全拼/双拼，方便家人借用电脑或临时输入生僻字。"
-                                                       Style="{StaticResource RowDescStyle}" />
-                                        </StackPanel>
-                                        <CheckBox x:Name="KeepBothSchemasCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
-                                                  Checked="InputControl_Changed" Unchecked="InputControl_Changed" />
-                                    </Grid>
-
-                                    <Border Style="{StaticResource CardDividerStyle}" />
-
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock Text="每页候选词数量" Style="{StaticResource RowTitleStyle}" />
-                                            <TextBlock Text="公开版建议 5 个紧凑精炼候选；如需一页查看更多重码可调至 7 或 9。"
-                                                       Style="{StaticResource RowDescStyle}" />
-                                        </StackPanel>
-                                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                                            <RadioButton x:Name="PageSize5Radio" Style="{StaticResource ChipRadioStyle}" GroupName="PageSize" Content="5" Checked="InputControl_Changed" />
-                                            <RadioButton x:Name="PageSize7Radio" Style="{StaticResource ChipRadioStyle}" GroupName="PageSize" Content="7" Checked="InputControl_Changed" />
-                                            <RadioButton x:Name="PageSize9Radio" Style="{StaticResource ChipRadioStyle}" GroupName="PageSize" Content="9" Margin="0" Checked="InputControl_Changed" />
-                                        </StackPanel>
-                                    </Grid>
-
-                                    <Border Style="{StaticResource CardDividerStyle}" />
-
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock Text="启用万象语法模型整句预测权重" Style="{StaticResource RowTitleStyle}" />
-                                            <TextBlock Text="在雾凇全拼与小鹤双拼中启用 wanxiang-lts-zh-hans 上下文语法模型，显著提升整句与双拼长句首选准确率。"
-                                                       Style="{StaticResource RowDescStyle}" />
-                                        </StackPanel>
-                                        <CheckBox x:Name="GrammarEnabledCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
-                                                  Checked="InputControl_Changed" Unchecked="InputControl_Changed" />
-                                    </Grid>
+                                    <theme:SettingRow Title="立即同步词库" Hint="上传这台电脑的词频，再合并手机和其他电脑的。" Keywords="同步 词频 userdb 上传 下载">
+                                        <Button x:Name="SyncNowBtn" Style="{StaticResource BrandButtonStyle}" Content="立即同步" Click="SyncNow_Click" />
+                                    </theme:SettingRow>
+                                    <theme:SettingRow Title="每天自动同步一次" Hint="开着托盘时，每隔 24 小时在后台同步。" Keywords="自动同步 每日">
+                                        <CheckBox x:Name="DailyAutoSyncCheck" Style="{StaticResource PillSwitchStyle}" Checked="AppOptionCheck_Changed" Unchecked="AppOptionCheck_Changed" />
+                                    </theme:SettingRow>
+                                    <theme:SettingRow Title="备份电脑配置" Hint="把方案、模糊音、皮肤和自定义短语存到网盘。" Keywords="备份 配置">
+                                        <Button x:Name="BackupProfileBtn" Style="{StaticResource GhostButtonStyle}" Content="备份到网盘" Click="BackupProfile_Click" />
+                                    </theme:SettingRow>
+                                    <theme:SettingRow Title="从网盘恢复配置" Hint="覆盖前会在本机自动留一份备份。" Keywords="恢复 还原 配置">
+                                        <Button x:Name="RestoreProfileBtn" Style="{StaticResource GhostButtonStyle}" Content="从网盘恢复…" Click="RestoreProfile_Click" />
+                                    </theme:SettingRow>
                                 </StackPanel>
                             </Border>
 
-                            <TextBlock Text="模糊拼音与快捷键防误触" Style="{StaticResource SectionEyebrowStyle}" />
-                            <Border Style="{StaticResource GlassCardStyle}">
+                            <TextBlock Text="剪贴板与文件" Style="{StaticResource CardTitleStyle}" />
+                            <Border Style="{StaticResource CardStyle}">
                                 <StackPanel>
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock Text="en ↔ eng 前后鼻音模糊（同时优化全拼与小鹤）" Style="{StaticResource RowTitleStyle}" />
-                                            <TextBlock Text="关闭或开启不影响常规声母韵母输入；针对双拼会补齐 f/g/r/c/z/s/b/p/m/n 等精确韵母推导。"
-                                                       Style="{StaticResource RowDescStyle}" />
-                                        </StackPanel>
-                                        <CheckBox x:Name="FuzzyEnEngCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
-                                                  Checked="InputControl_Changed" Unchecked="InputControl_Changed" />
-                                    </Grid>
-
-                                    <Border Style="{StaticResource CardDividerStyle}" />
-
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock Text="in ↔ ing 前后鼻音模糊" Style="{StaticResource RowTitleStyle}" />
-                                            <TextBlock Text="允许「心(xin) / 星(xing)」「林(lin) / 零(ling)」互通候选匹配，打字无需反复斟酌后鼻音。"
-                                                       Style="{StaticResource RowDescStyle}" />
-                                        </StackPanel>
-                                        <CheckBox x:Name="FuzzyInIngCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
-                                                  Checked="InputControl_Changed" Unchecked="InputControl_Changed" />
-                                    </Grid>
-
-                                    <Border Style="{StaticResource CardDividerStyle}" />
-
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock Text="平翘舌 zh/ch/sh ↔ z/c/s 模糊" Style="{StaticResource RowTitleStyle}" />
-                                            <TextBlock Text="允许声母 z/c/s 与 zh/ch/sh（小鹤双拼对应 v/i/u）互相匹配。"
-                                                       Style="{StaticResource RowDescStyle}" />
-                                        </StackPanel>
-                                        <CheckBox x:Name="FuzzyZhChShCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
-                                                  Checked="InputControl_Changed" Unchecked="InputControl_Changed" />
-                                    </Grid>
-
-                                    <Border Style="{StaticResource CardDividerStyle}" />
-
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock Text="小鹤双拼保留原文编码显示" Style="{StaticResource RowTitleStyle}" />
-                                            <TextBlock Text="行内预编辑区直接展示键入的双拼字母（如 ui、dk），不展开还原为全拼音节。"
-                                                       Style="{StaticResource RowDescStyle}" />
-                                        </StackPanel>
-                                        <CheckBox x:Name="KeepRawFlypyCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
-                                                  Checked="InputControl_Changed" Unchecked="InputControl_Changed" />
-                                    </Grid>
-
-                                    <Border Style="{StaticResource CardDividerStyle}" />
-
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock Text="禁用 Shift 误触，仅用 Ctrl+Space 切换中英文" Style="{StaticResource RowTitleStyle}" />
-                                            <TextBlock Text="防止写代码或全选时随手按下左/右 Shift 导致输入法意外切到英文模式（个人常用防误触设定）。"
-                                                       Style="{StaticResource RowDescStyle}" />
-                                        </StackPanel>
-                                        <CheckBox x:Name="CtrlSpaceOnlyCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
-                                                  Checked="InputControl_Changed" Unchecked="InputControl_Changed" />
-                                    </Grid>
-
-                                    <Border Style="{StaticResource CardDividerStyle}" />
-
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock Text="任务栏右下角显示「中 / 英」状态图标" Style="{StaticResource RowTitleStyle}" />
-                                            <TextBlock Text="控制 Windows 任务栏右下角输入指示器（「中 / 英」与输入法图标）是否显示；默认开启，关闭后开机自动维持。"
-                                                       Style="{StaticResource RowDescStyle}" />
-                                        </StackPanel>
-                                        <CheckBox x:Name="ShowTaskbarImeIconCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
-                                                  Click="ImeIconSetting_Click" />
-                                    </Grid>
-
-                                    <Border Style="{StaticResource CardDividerStyle}" />
-
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock Text="切换中英文时弹出「中 / 英」浮动提示图标" Style="{StaticResource RowTitleStyle}" />
-                                            <TextBlock Text="控制按 Ctrl+Space / Shift 切换中英文时是否在光标旁短暂弹出「中 / 英」浮动小图标（点击即保存并部署生效）。"
-                                                       Style="{StaticResource RowDescStyle}" />
-                                        </StackPanel>
-                                        <CheckBox x:Name="ShowAsciiSwitchTipCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
-                                                  Click="ImeIconSetting_Click" />
-                                    </Grid>
-
-                                    <Border Style="{StaticResource CardDividerStyle}" />
-
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock Text="使用 Tab 键向后翻页" Style="{StaticResource RowTitleStyle}" />
-                                            <TextBlock Text="修复上游默认配置中 Tab 切分音节问题，允许在候选栏弹出时用 Tab 快速向后翻页（Shift+Tab 上一页）。"
-                                                       Style="{StaticResource RowDescStyle}" />
-                                        </StackPanel>
-                                        <CheckBox x:Name="TabPageFlipCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
-                                                  Checked="InputControl_Changed" Unchecked="InputControl_Changed" />
-                                    </Grid>
-
-                                    <Border Style="{StaticResource CardDividerStyle}" />
-
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock Text="启用 Rime 拼写容错纠错（enable_correction）" Style="{StaticResource RowTitleStyle}" />
-                                            <TextBlock Text="把邻键误触、键序错位的猜测也放进候选，会和正常结果混在一起，可能把不想要的词排到前面，默认关闭；打字常按错邻键时再开启（需重新部署生效）。"
-                                                       Style="{StaticResource RowDescStyle}" />
-                                        </StackPanel>
-                                        <CheckBox x:Name="EnableCorrectionCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
-                                                  Checked="InputControl_Changed" Unchecked="InputControl_Changed" />
-                                    </Grid>
-
-                                    <Border Style="{StaticResource CardDividerStyle}" />
-
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock Text="英文模式下「.」「,」后自动加空格" Style="{StaticResource RowTitleStyle}" />
-                                            <TextBlock Text="在小狼毫英文模式中输入句点或逗号后，接着打下一个单词时自动在它前面补一个空格；小数和千分位（3.14、1,000）、省略号、e.g. 这类缩写和句末回车不受影响（需重新部署生效）。"
-                                                       Style="{StaticResource RowDescStyle}" />
-                                        </StackPanel>
-                                        <CheckBox x:Name="AsciiAutoSpaceCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
-                                                  Checked="InputControl_Changed" Unchecked="InputControl_Changed" />
-                                    </Grid>
-
-                                    <Border Style="{StaticResource CardDividerStyle}" />
-
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock Text="中文输入默认用英文标点" Style="{StaticResource RowTitleStyle}" />
-                                            <TextBlock Text="关闭时中文输入打出中文标点（，。？）；开启后默认打英文标点（, . ?）。两种情况下都可以按 Ctrl+. 临时切换（需重新部署生效）。"
-                                                       Style="{StaticResource RowDescStyle}" />
-                                        </StackPanel>
-                                        <CheckBox x:Name="AsciiPunctDefaultCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
-                                                  Checked="InputControl_Changed" Unchecked="InputControl_Changed" />
-                                    </Grid>
-
-                                    <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
-                                        <Button x:Name="ApplyRimeBtn" Style="{StaticResource BrandButtonStyle}"
-                                                Content="保存输入方案并部署生效"
-                                                Click="ApplyRimeConfig_Click" />
-                                        <Button Style="{StaticResource GhostButtonStyle}"
-                                                Margin="10,0,0,0"
-                                                Content="从当前配置重新读取"
-                                                Click="ReloadState_Click" />
-                                        <Border x:Name="InputDirtyBadge" Visibility="Collapsed"
-                                                Background="{DynamicResource WpBrandSoftBrush}"
-                                                BorderBrush="{DynamicResource WpBrandBrush}" BorderThickness="1"
-                                                CornerRadius="8" Padding="10,5" Margin="10,0,0,0" VerticalAlignment="Center">
-                                            <TextBlock Text="有未部署更改" FontSize="11.5" FontWeight="SemiBold"
-                                                       Foreground="{DynamicResource WpBrandInkBrush}" />
+                                    <theme:SettingRow Title="剪贴板同步（手机 ⇄ 电脑）" Hint="复制的文字、图片和文件自动互通：同一网络下直连，不在一起时经网盘中转。手机键盘菜单里也要打开。" Keywords="剪贴板 复制 粘贴 文件 互传 clipboard">
+                                        <CheckBox x:Name="ClipboardSyncCheck" Style="{StaticResource PillSwitchStyle}" Click="ClipboardSyncCheck_Click" />
+                                    </theme:SettingRow>
+                                    <theme:SettingRow Title="当前状态" Keywords="连接状态">
+                                        <Border Style="{StaticResource BadgeStyle}" Background="{DynamicResource WpGlassBgBrush}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <Ellipse x:Name="ClipSyncDot" Width="8" Height="8" Margin="0,0,7,0" VerticalAlignment="Center" Fill="{DynamicResource WpMutedBrush}" />
+                                                <TextBlock x:Name="ClipSyncStatusText" Text="未开启" FontSize="12" Foreground="{DynamicResource WpTextSecondaryBrush}" />
+                                            </StackPanel>
                                         </Border>
-                                    </StackPanel>
+                                    </theme:SettingRow>
                                 </StackPanel>
                             </Border>
                         </StackPanel>
 
-                        <!-- ══════════════════ TAB 3：外观与皮肤 ══════════════════ -->
-                        <StackPanel x:Name="PageSkin" Visibility="Collapsed">
-                            <TextBlock Text="控制中心界面主题" Style="{StaticResource SectionEyebrowStyle}" />
+                        <!-- ══════════ 词库 ══════════ -->
+                        <StackPanel x:Name="PageDict" Visibility="Collapsed">
+                            <TextBlock Text="词库" Style="{StaticResource PageTitleStyle}" />
+                            <TextBlock Text="语法模型与自定义短语。" Style="{StaticResource PageSubtitleStyle}" />
 
-                            <Border Style="{StaticResource GlassCardStyle}">
+                            <Grid>
+                                <TextBlock Text="万象语法模型" Style="{StaticResource CardTitleStyle}" />
+                                <Border x:Name="GrammarBadge" Style="{StaticResource BadgeStyle}" HorizontalAlignment="Right" Margin="0,0,0,8">
+                                    <TextBlock x:Name="GrammarBadgeText" Text="检测中" FontSize="12" FontFamily="{StaticResource WpMonoFont}" />
+                                </Border>
+                            </Grid>
+                            <Border Style="{StaticResource CardStyle}" Padding="18,14,18,16">
+                                <StackPanel>
+                                    <TextBlock Text="约 398 MB 的中文语言模型，装上后整句和双拼的首选更准。支持断点续传。" Style="{StaticResource HintTextStyle}"
+                                               Foreground="{DynamicResource WpTextSecondaryBrush}" FontSize="13" />
+                                    <TextBlock x:Name="GrammarDetailText" Text="正在读取本地模型…" Style="{StaticResource HintTextStyle}" Margin="0,6,0,14" />
+                                    <WrapPanel>
+                                        <Button x:Name="DownloadGrammarBtn" Style="{StaticResource BrandButtonStyle}" Content="下载语法模型" Margin="0,0,8,6" Click="DownloadGrammar_Click" />
+                                        <Button x:Name="CheckGrammarBtn" Style="{StaticResource GhostButtonStyle}" Content="检查更新" Margin="0,0,8,6" Click="CheckGrammar_Click" />
+                                        <Button x:Name="CancelGrammarBtn" Style="{StaticResource GhostButtonStyle}" Content="暂停（保留进度）" Margin="0,0,8,6" Visibility="Collapsed" Click="CancelGrammar_Click" />
+                                        <Button x:Name="DeleteGrammarBtn" Style="{StaticResource DangerButtonStyle}" Content="卸载模型" Margin="0,0,0,6" Click="DeleteGrammar_Click" />
+                                    </WrapPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <TextBlock Text="自定义短语" Style="{StaticResource CardTitleStyle}" />
+                            <Border Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <theme:SettingRow Title="全拼短语" Hint="custom_phrase.txt，保存后回来点左下角「重新部署」。" Keywords="短语 自定义 custom_phrase">
+                                        <Button Style="{StaticResource GhostButtonStyle}" Content="编辑" Click="EditFullPhrase_Click" />
+                                    </theme:SettingRow>
+                                    <theme:SettingRow Title="双拼短语" Hint="custom_phrase_double.txt。" Keywords="短语 自定义 双拼">
+                                        <Button Style="{StaticResource GhostButtonStyle}" Content="编辑" Click="EditDoublePhrase_Click" />
+                                    </theme:SettingRow>
+                                    <theme:SettingRow Title="Rime 用户目录" Hint="词库、方案和日志都在这里。" Keywords="目录 文件夹 rime 用户">
+                                        <Button Style="{StaticResource GhostButtonStyle}" Content="打开" Click="OpenRimeFolder_Click" />
+                                    </theme:SettingRow>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+
+                        <!-- ══════════ 高级 ══════════ -->
+                        <StackPanel x:Name="PageAdvanced" Visibility="Collapsed">
+                            <TextBlock Text="高级" Style="{StaticResource PageTitleStyle}" />
+                            <TextBlock Text="系统整合与故障排查。" Style="{StaticResource PageSubtitleStyle}" />
+
+                            <TextBlock Text="系统整合" Style="{StaticResource CardTitleStyle}" />
+                            <Border Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <theme:SettingRow Title="不让特定应用强制切到英文" Hint="打开后，切到终端、代码编辑器时保持当前的中英状态。" Keywords="强制英文 终端 编辑器 app_options">
+                                        <CheckBox x:Name="DisableForcedAsciiCheck" Style="{StaticResource PillSwitchStyle}" Checked="SkinControl_Changed" Unchecked="SkinControl_Changed" />
+                                    </theme:SettingRow>
+                                    <theme:SettingRow x:Name="MsPinyinRow" Title="微软拼音" Hint="正在检测…" Keywords="微软拼音 移除 冲突">
+                                        <Button x:Name="RemoveMsPinyinBtn" Style="{StaticResource GhostButtonStyle}" Content="移除微软拼音" Click="RemoveMsPinyin_Click" />
+                                    </theme:SettingRow>
+                                </StackPanel>
+                            </Border>
+
+                            <TextBlock Text="故障排查" Style="{StaticResource CardTitleStyle}" />
+                            <Border Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <theme:SettingRow Title="重启输入法服务" Hint="候选窗不出现或打字没反应时试试。" Keywords="重启 weaselserver 服务 卡住">
+                                        <Button x:Name="RestartWeaselBtn" Style="{StaticResource GhostButtonStyle}" Content="重启服务" Click="RestartWeasel_Click" />
+                                    </theme:SettingRow>
+                                    <theme:SettingRow Title="从磁盘重新读取设置" Hint="手动改过配置文件后，让这个窗口显示最新的值。" Keywords="重新读取 刷新">
+                                        <Button Style="{StaticResource GhostButtonStyle}" Content="重新读取" Click="ReloadState_Click" />
+                                    </theme:SettingRow>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+
+                        <!-- ══════════ 关于 ══════════ -->
+                        <StackPanel x:Name="PageAbout" Visibility="Collapsed">
+                            <TextBlock Text="关于" Style="{StaticResource PageTitleStyle}" />
+                            <TextBlock Text="版本、更新与开源许可。" Style="{StaticResource PageSubtitleStyle}" />
+
+                            <Border Style="{StaticResource CardStyle}" Padding="18,16">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel>
-                                        <TextBlock Text="暖纸液态玻璃明暗模式" Style="{StaticResource RowTitleStyle}" />
-                                        <TextBlock Text="控制当前设置界面的浅色（羊皮暖白）/ 深色（暖炭黑）配色，默认自动跟随 Windows 系统。"
-                                                   Style="{StaticResource RowDescStyle}" />
+                                        <TextBlock Text="Ifboard for Windows" Style="{StaticResource CardTitleStyle}" Margin="0" FontSize="19" />
+                                        <TextBlock x:Name="AboutVersionText" Text="v1.3.4" FontFamily="{StaticResource WpMonoFont}" FontSize="12.5"
+                                                   Foreground="{DynamicResource WpMutedBrush}" Margin="0,4,0,0" />
+                                        <TextBlock x:Name="AppUpdateInfoText" Text="内置小狼毫 0.17.4、雾凇拼音、小鹤双拼与万象语法模型。" Style="{StaticResource HintTextStyle}" Margin="0,8,12,0" />
                                     </StackPanel>
-                                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                                        <RadioButton x:Name="UiAutoRadio" Style="{StaticResource ChipRadioStyle}"
-                                                     GroupName="UiMode" Content="跟随系统" Checked="UiModeRadio_Checked" />
-                                        <RadioButton x:Name="UiLightRadio" Style="{StaticResource ChipRadioStyle}"
-                                                     GroupName="UiMode" Content="羊皮浅色" Checked="UiModeRadio_Checked" />
-                                        <RadioButton x:Name="UiDarkRadio" Style="{StaticResource ChipRadioStyle}"
-                                                     GroupName="UiMode" Content="暖炭深色" Margin="0" Checked="UiModeRadio_Checked" />
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top">
+                                        <Button x:Name="CheckAppUpdateBtn" Style="{StaticResource BrandButtonStyle}" Content="检查更新" Margin="0,0,8,0" Click="CheckAppUpdate_Click" />
+                                        <Button Style="{StaticResource GhostButtonStyle}" Content="GitHub" Click="OpenGithub_Click" />
                                     </StackPanel>
                                 </Grid>
                             </Border>
 
-                            <TextBlock Text="小狼毫候选框皮肤预设（支持浅/深色自动切换）" Style="{StaticResource SectionEyebrowStyle}" />
-                            <Border Style="{StaticResource GlassCardStyle}">
+                            <Border Style="{StaticResource CardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="选择候选窗主题配色" Style="{StaticResource RowTitleStyle}" />
-                                    <TextBlock Text="「Claude 陶土橙」与手机端 1.2.1 公开版完全统一；「跟随 Windows 主体色」会自动采集系统个性色生成高对比昼夜双配色。"
-                                               Style="{StaticResource RowDescStyle}" Margin="0,3,0,10" />
-
-                                    <WrapPanel Margin="0,0,0,12">
-                                        <RadioButton x:Name="SkinTerracottaRadio" Style="{StaticResource ChipRadioStyle}"
-                                                     GroupName="SkinPreset" Content="Claude 陶土橙（默认推荐）"
-                                                     Checked="SkinControl_Changed" />
-                                        <RadioButton x:Name="SkinSystemAccentRadio" Style="{StaticResource ChipRadioStyle}"
-                                                     GroupName="SkinPreset" Content="跟随 Windows 主体色"
-                                                     Checked="SkinControl_Changed" />
-                                        <RadioButton x:Name="SkinAmberRadio" Style="{StaticResource ChipRadioStyle}"
-                                                     GroupName="SkinPreset" Content="暖纸琥珀"
-                                                     Checked="SkinControl_Changed" />
-                                    </WrapPanel>
-
-                                    <!-- 实时浅色/深色双候选栏预览 -->
-                                    <Border Background="{DynamicResource WpCardSubtleBrush}"
-                                            BorderBrush="{DynamicResource WpBorderStrongBrush}"
-                                            BorderThickness="1"
-                                            CornerRadius="14" Padding="14,12">
-                                        <StackPanel>
-                                            <Grid Margin="0,0,0,10">
-                                                <TextBlock Text="实时候选条效果预览（浅色模式 / 深色模式）"
-                                                           FontSize="12" FontWeight="SemiBold"
-                                                           Foreground="{DynamicResource WpTextSecondaryBrush}" />
-                                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                                    <Ellipse x:Name="AccentSwatchDot" Width="11" Height="11" Margin="0,0,6,0" />
-                                                    <TextBlock x:Name="AccentHexText" Text="当前系统主体色 #D97757"
-                                                               FontSize="11.5" Foreground="{DynamicResource WpMutedBrush}" />
-                                                </StackPanel>
-                                            </Grid>
-
-                                            <Grid>
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="12" />
-                                                    <ColumnDefinition Width="*" />
-                                                </Grid.ColumnDefinitions>
-
-                                                <!-- 浅色候选预览 -->
-                                                <Border x:Name="PreviewLightBox" Grid.Column="0"
-                                                        BorderThickness="1" CornerRadius="8" Padding="10,7">
-                                                    <StackPanel>
-                                                        <TextBlock x:Name="PreviewLightPreedit" Text="shurufa" FontSize="12" Margin="0,0,0,5" />
-                                                        <WrapPanel VerticalAlignment="Center">
-                                                            <Border x:Name="PreviewLightHilitePill" CornerRadius="5" Padding="7,3" Margin="0,0,8,0">
-                                                                <StackPanel Orientation="Horizontal">
-                                                                    <TextBlock x:Name="PreviewLightHiliteLbl" Text="1." FontSize="11.5" Margin="0,0,4,0" VerticalAlignment="Center" />
-                                                                    <TextBlock x:Name="PreviewLightHiliteTxt" Text="输入法" FontSize="13.5" FontWeight="Medium" VerticalAlignment="Center" />
-                                                                </StackPanel>
-                                                            </Border>
-                                                            <TextBlock x:Name="PreviewLightCand2" Text="2. 舒舒服服" FontSize="13.5" Margin="0,0,10,0" VerticalAlignment="Center" />
-                                                            <TextBlock x:Name="PreviewLightCand3" Text="3. 书" FontSize="13.5" VerticalAlignment="Center" />
-                                                        </WrapPanel>
-                                                    </StackPanel>
-                                                </Border>
-
-                                                <!-- 深色候选预览 -->
-                                                <Border x:Name="PreviewDarkBox" Grid.Column="2"
-                                                        BorderThickness="1" CornerRadius="8" Padding="10,7">
-                                                    <StackPanel>
-                                                        <TextBlock x:Name="PreviewDarkPreedit" Text="shurufa" FontSize="12" Margin="0,0,0,5" />
-                                                        <WrapPanel VerticalAlignment="Center">
-                                                            <Border x:Name="PreviewDarkHilitePill" CornerRadius="5" Padding="7,3" Margin="0,0,8,0">
-                                                                <StackPanel Orientation="Horizontal">
-                                                                    <TextBlock x:Name="PreviewDarkHiliteLbl" Text="1." FontSize="11.5" Margin="0,0,4,0" VerticalAlignment="Center" />
-                                                                    <TextBlock x:Name="PreviewDarkHiliteTxt" Text="输入法" FontSize="13.5" FontWeight="Medium" VerticalAlignment="Center" />
-                                                                </StackPanel>
-                                                            </Border>
-                                                            <TextBlock x:Name="PreviewDarkCand2" Text="2. 舒舒服服" FontSize="13.5" Margin="0,0,10,0" VerticalAlignment="Center" />
-                                                            <TextBlock x:Name="PreviewDarkCand3" Text="3. 书" FontSize="13.5" VerticalAlignment="Center" />
-                                                        </WrapPanel>
-                                                    </StackPanel>
-                                                </Border>
-                                            </Grid>
-                                        </StackPanel>
-                                    </Border>
-
-                                    <Border Style="{StaticResource CardDividerStyle}" />
-
-                                    <!-- 排版参数 -->
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock Text="候选条间距密度" Style="{StaticResource RowTitleStyle}" />
-                                            <TextBlock Text="「紧凑微胶囊」适合高分屏少遮挡文字；「舒适标准」留白更充裕。"
-                                                       Style="{StaticResource RowDescStyle}" />
-                                        </StackPanel>
-                                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                                            <RadioButton x:Name="DensityCompactRadio" Style="{StaticResource ChipRadioStyle}"
-                                                         GroupName="Density" Content="紧凑微胶囊" Checked="SkinControl_Changed" />
-                                            <RadioButton x:Name="DensityStandardRadio" Style="{StaticResource ChipRadioStyle}"
-                                                         GroupName="Density" Content="舒适标准" Margin="0" Checked="SkinControl_Changed" />
-                                        </StackPanel>
-                                    </Grid>
-
-                                    <Border Style="{StaticResource CardDividerStyle}" />
-
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="170" />
-                                            <ColumnDefinition Width="46" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock Text="候选文字字号（pt）" Style="{StaticResource RowTitleStyle}" />
-                                            <TextBlock Text="默认 12 pt（编号与编码提示自动缩减 1 pt，层次更分明）。"
-                                                       Style="{StaticResource RowDescStyle}" />
-                                        </StackPanel>
-                                        <Slider x:Name="FontSlider" Grid.Column="1" Minimum="10" Maximum="18"
-                                                IsSnapToTickEnabled="True" TickFrequency="1"
-                                                VerticalAlignment="Center" ValueChanged="SkinSlider_ValueChanged" />
-                                        <TextBlock x:Name="FontValueText" Grid.Column="2" Text="12"
-                                                   HorizontalAlignment="Right" VerticalAlignment="Center" FontWeight="SemiBold" />
-                                    </Grid>
-
-                                    <Border Style="{StaticResource CardDividerStyle}" />
-
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="170" />
-                                            <ColumnDefinition Width="46" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock Text="窗口外边框圆角半径" Style="{StaticResource RowTitleStyle}" />
-                                            <TextBlock Text="默认 7 px，高亮候选胶囊自动内缩 2 px 以呈现和谐同心圆角。"
-                                                       Style="{StaticResource RowDescStyle}" />
-                                        </StackPanel>
-                                        <Slider x:Name="CornerSlider" Grid.Column="1" Minimum="0" Maximum="14"
-                                                IsSnapToTickEnabled="True" TickFrequency="1"
-                                                VerticalAlignment="Center" ValueChanged="SkinSlider_ValueChanged" />
-                                        <TextBlock x:Name="CornerValueText" Grid.Column="2" Text="7"
-                                                   HorizontalAlignment="Right" VerticalAlignment="Center" FontWeight="SemiBold" />
-                                    </Grid>
-
-                                    <Border Style="{StaticResource CardDividerStyle}" />
-
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock Text="后台自动跟随 Windows 主体色变化" Style="{StaticResource RowTitleStyle}" />
-                                            <TextBlock Text="在系统托盘以极低内存监听系统壁纸取色或明暗切换；当皮肤选为「跟随 Windows 主体色」时自动更新并部署。"
-                                                       Style="{StaticResource RowDescStyle}" />
-                                        </StackPanel>
-                                        <CheckBox x:Name="AutoAccentTrayCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
-                                                  Checked="SkinControl_Changed" Unchecked="SkinControl_Changed" />
-                                    </Grid>
-
-                                    <Border Style="{StaticResource CardDividerStyle}" />
-
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock Text="禁止特定应用强制切换为英文" Style="{StaticResource RowTitleStyle}" />
-                                            <TextBlock Text="清空上游默认对终端/代码编辑器强切英文规则，切窗始终保留当前中英文输入态，避免输入焦点混乱。"
-                                                       Style="{StaticResource RowDescStyle}" />
-                                        </StackPanel>
-                                        <CheckBox x:Name="DisableForcedAsciiCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
-                                                  Checked="SkinControl_Changed" Unchecked="SkinControl_Changed" />
-                                    </Grid>
-
-                                    <Border Style="{StaticResource CardDividerStyle}" />
-
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock Text="任务栏右下角显示「中 / 英」状态图标" Style="{StaticResource RowTitleStyle}" />
-                                            <TextBlock Text="控制 Windows 任务栏右下角输入指示器（「中 / 英」与输入法图标）是否显示；默认开启，关闭后开机自动维持。"
-                                                       Style="{StaticResource RowDescStyle}" />
-                                        </StackPanel>
-                                        <CheckBox x:Name="ShowTaskbarImeIconSkinCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
-                                                  Click="ImeIconSetting_Click" />
-                                    </Grid>
-
-                                    <Border Style="{StaticResource CardDividerStyle}" />
-
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock Text="切换中英文时弹出「中 / 英」浮动提示图标" Style="{StaticResource RowTitleStyle}" />
-                                            <TextBlock Text="控制小狼毫在切换中英文时是否弹出光标旁「中 / 英」小图标（show_notifications，点击即保存并部署）。"
-                                                       Style="{StaticResource RowDescStyle}" />
-                                        </StackPanel>
-                                        <CheckBox x:Name="ShowAsciiSwitchTipSkinCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
-                                                  Click="ImeIconSetting_Click" />
-                                    </Grid>
-
-                                    <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
-                                        <Button x:Name="ApplySkinBtn" Style="{StaticResource BrandButtonStyle}"
-                                                Content="保存外观皮肤并立即生效"
-                                                Click="ApplySkin_Click" />
-                                        <Button Style="{StaticResource GhostButtonStyle}"
-                                                Margin="10,0,0,0"
-                                                Content="重新采集 Windows 主体色"
-                                                Click="RefreshSystemColor_Click" />
-                                        <Border x:Name="SkinDirtyBadge" Visibility="Collapsed"
-                                                Background="{DynamicResource WpBrandSoftBrush}"
-                                                BorderBrush="{DynamicResource WpBrandBrush}" BorderThickness="1"
-                                                CornerRadius="8" Padding="10,5" Margin="10,0,0,0" VerticalAlignment="Center">
-                                            <TextBlock Text="有未部署更改" FontSize="11.5" FontWeight="SemiBold"
-                                                       Foreground="{DynamicResource WpBrandInkBrush}" />
-                                        </Border>
-                                    </StackPanel>
-                                </StackPanel>
-                            </Border>
-                        </StackPanel>
-
-                        <!-- ══════════════════ TAB 4：工具与关于 ══════════════════ -->
-                        <StackPanel x:Name="PageAbout" Visibility="Collapsed">
-                            <TextBlock Text="系统整合与快捷维护" Style="{StaticResource SectionEyebrowStyle}" />
-
-                            <Border Style="{StaticResource GlassCardStyle}">
-                                <StackPanel>
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock Text="微软拼音接管与系统精简" Style="{StaticResource RowTitleStyle}" />
-                                            <TextBlock x:Name="MsPinyinStatusText"
-                                                       Text="检测微软拼音输入法状态中..."
-                                                       Style="{StaticResource RowDescStyle}" />
-                                        </StackPanel>
-                                        <Button x:Name="RemoveMsPinyinBtn" Grid.Column="1"
-                                                Style="{StaticResource GhostButtonStyle}"
-                                                Content="移除微软拼音"
-                                                Click="RemoveMsPinyin_Click" />
-                                    </Grid>
-
-                                    <Border Style="{StaticResource CardDividerStyle}" />
-
-                                    <TextBlock Text="常用数据文件与运行目录" Style="{StaticResource RowTitleStyle}" />
-                                    <TextBlock Text="自定义短语在修改保存后，点击左侧「立即部署小狼毫」即可全局生效。"
-                                               Style="{StaticResource RowDescStyle}" Margin="0,2,0,10" />
-                                    <WrapPanel>
-                                        <Button Style="{StaticResource GhostButtonStyle}" Content="打开 Rime 用户目录"
-                                                Margin="0,0,8,8" Click="OpenRimeFolder_Click" />
-                                        <Button Style="{StaticResource GhostButtonStyle}" Content="编辑全拼短语 (custom_phrase.txt)"
-                                                Margin="0,0,8,8" Click="EditFullPhrase_Click" />
-                                        <Button Style="{StaticResource GhostButtonStyle}" Content="编辑双拼短语 (custom_phrase_double.txt)"
-                                                Margin="0,0,8,8" Click="EditDoublePhrase_Click" />
-                                        <Button x:Name="RestartWeaselBtn" Style="{StaticResource GhostButtonStyle}" Content="重启 WeaselServer 服务"
-                                                Margin="0,0,0,8" Click="RestartWeasel_Click" />
-                                    </WrapPanel>
+                                    <theme:SettingRow Title="启动时检查新版本" Hint="只提示电脑版安装包，不提示手机版更新。" Keywords="更新 新版本 升级">
+                                        <CheckBox x:Name="AutoCheckUpdateCheck" Style="{StaticResource PillSwitchStyle}" Checked="AppOptionCheck_Changed" Unchecked="AppOptionCheck_Changed" />
+                                    </theme:SettingRow>
                                 </StackPanel>
                             </Border>
 
-                            <TextBlock Text="版本、开源仓库与核心组件致谢" Style="{StaticResource SectionEyebrowStyle}" />
-                            <Border Style="{StaticResource GlassCardStyle}">
-                                <StackPanel>
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock x:Name="AboutTitleText" Text="Ifboard for Windows" FontSize="15" FontWeight="Bold" />
-                                            <TextBlock x:Name="AppUpdateInfoText"
-                                                       Text="暖纸液态玻璃桌面控制中心 · 已完整打包小狼毫 0.17.4、雾凇拼音、小鹤双拼与万象语法模型生态。"
-                                                       Style="{StaticResource RowDescStyle}" Margin="0,4,12,0" />
-                                        </StackPanel>
-                                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top">
-                                            <Button x:Name="CheckAppUpdateBtn" Style="{StaticResource GhostButtonStyle}"
-                                                    Content="检查新版本" Margin="0,0,8,0"
-                                                    Click="CheckAppUpdate_Click" />
-                                            <Button Style="{StaticResource GhostButtonStyle}"
-                                                    Content="GitHub 主页"
-                                                    Click="OpenGithub_Click" />
-                                        </StackPanel>
-                                    </Grid>
-
-                                    <Border Style="{StaticResource CardDividerStyle}" />
-
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock Text="启动时自动检查 Windows 端新版本（仅匹配 .exe 安装包）" Style="{StaticResource RowTitleStyle}" />
-                                            <TextBlock Text="检查 GitHub Release 时自动跳过仅含 Android APK 的版本，避免桌面端收到移动端更新提示。"
-                                                       Style="{StaticResource RowDescStyle}" />
-                                        </StackPanel>
-                                        <CheckBox x:Name="AutoCheckUpdateCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
-                                                  Checked="AppOptionCheck_Changed" Unchecked="AppOptionCheck_Changed" />
-                                    </Grid>
-
-                                    <Border Style="{StaticResource CardDividerStyle}" />
-
-                                    <TextBlock Text="开源驱动致谢" Style="{StaticResource RowTitleStyle}" Margin="0,0,0,6" />
-                                    <TextBlock Style="{StaticResource RowDescStyle}" Margin="0">
-                                        <Run Text="• 输入引擎：Rime / 小狼毫 Weasel 0.17.4（GPL-3.0 协议）" /><LineBreak />
-                                        <Run Text="• 词库与方案：雾凇拼音（rime-ice 全拼 + 小鹤双拼 + 拆字反查 + 英文混输）" /><LineBreak />
-                                        <Run Text="• 长句语法模型：amzxyz/rime-wanxiang-data 万象中文语法模型 LTS" /><LineBreak />
-                                        <Run Text="• 美术系统：Warm Paper · Liquid Glass（羊皮暖白 × Claude 陶土橙 × Windows 系统取色引擎）" />
-                                    </TextBlock>
-                                </StackPanel>
+                            <TextBlock Text="开源许可" Style="{StaticResource CardTitleStyle}" />
+                            <Border Style="{StaticResource CardStyle}" Padding="18,14">
+                                <TextBlock Style="{StaticResource HintTextStyle}" Foreground="{DynamicResource WpTextSecondaryBrush}" LineHeight="22">
+                                    <Run Text="输入引擎：Rime / 小狼毫 Weasel 0.17.4（GPL-3.0）" /><LineBreak />
+                                    <Run Text="词库与方案：雾凇拼音 rime-ice（全拼、小鹤双拼、英文混输）" /><LineBreak />
+                                    <Run Text="语法模型：amzxyz/rime-wanxiang-data 万象中文语法模型 LTS" />
+                                </TextBlock>
                             </Border>
                         </StackPanel>
                     </Grid>
                 </ScrollViewer>
             </DockPanel>
         </Grid>
+
+        <!-- 玻璃胶囊 Toast：底部浮出，1.5 秒后淡出 -->
+        <Border x:Name="ToastHost" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="234,0,0,28"
+                CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={StaticResource PillRadius}}" Padding="18,9" Opacity="0" IsHitTestVisible="False"
+                Background="{DynamicResource WpSurfaceBrush}" BorderBrush="{DynamicResource WpBorderStrongBrush}" BorderThickness="1">
+            <Border.RenderTransform><TranslateTransform x:Name="ToastShift" Y="12" /></Border.RenderTransform>
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="24" ShadowDepth="6" Direction="270" Opacity="0.14" Color="#3C2814" />
+            </Border.Effect>
+            <StackPanel Orientation="Horizontal">
+                <Ellipse x:Name="ToastDot" Width="8" Height="8" Margin="0,0,9,0" VerticalAlignment="Center" Fill="{DynamicResource WpSageBrush}" />
+                <TextBlock x:Name="ToastText" Text="已保存" FontSize="13" />
+            </StackPanel>
+        </Border>
     </Grid>
 </Window>

@@ -44,9 +44,6 @@ class MainFragment : PaddingPreferenceFragment() {
             menu.item(R.string.faq) {
                 navigateWithAnim(SettingsRoute.Faq)
             }
-            menu.item(R.string.developer) {
-                navigateWithAnim(SettingsRoute.Developer)
-            }
             menu.item(R.string.about) {
                 navigateWithAnim(SettingsRoute.About)
             }
@@ -66,6 +63,7 @@ class MainFragment : PaddingPreferenceFragment() {
     }
 
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
+        // Ifboard：主页只留常用分类；全局选项 / 输入法 / 附加组件 / 插件 / 开发者挪进「高级 → 专家选项」
         preferenceScreen = preferenceManager.createPreferenceScreen(requireContext()).apply {
             addCategory("词库与云端") {
                 addPreference(Preference(requireContext()).apply {
@@ -76,29 +74,7 @@ class MainFragment : PaddingPreferenceFragment() {
                     }
                 })
             }
-            addCategory("输入与引擎") {
-                addDestinationPreference(
-                    R.string.global_options,
-                    R.drawable.ic_baseline_tune_24,
-                    SettingsRoute.GlobalConfig
-                )
-                addDestinationPreference(
-                    R.string.input_methods,
-                    R.drawable.ic_baseline_language_24,
-                    SettingsRoute.InputMethodList
-                )
-                addDestinationPreference(
-                    R.string.addons,
-                    R.drawable.ic_baseline_extension_24,
-                    SettingsRoute.AddonList
-                )
-            }
-            addCategory("外观与系统") {
-                addDestinationPreference(
-                    R.string.theme,
-                    R.drawable.ic_baseline_palette_24,
-                    SettingsRoute.Theme
-                )
+            addCategory("输入") {
                 addDestinationPreference(
                     R.string.virtual_keyboard,
                     R.drawable.ic_baseline_keyboard_24,
@@ -119,11 +95,15 @@ class MainFragment : PaddingPreferenceFragment() {
                     R.drawable.ic_baseline_emoji_symbols_24,
                     SettingsRoute.Symbol
                 )
+            }
+            addCategory("外观") {
                 addDestinationPreference(
-                    R.string.plugins,
-                    R.drawable.ic_baseline_android_24,
-                    SettingsRoute.Plugin
+                    R.string.theme,
+                    R.drawable.ic_baseline_palette_24,
+                    SettingsRoute.Theme
                 )
+            }
+            addCategory("更多") {
                 addDestinationPreference(
                     R.string.advanced,
                     R.drawable.ic_baseline_more_horiz_24,

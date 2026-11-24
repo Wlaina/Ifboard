@@ -78,6 +78,9 @@ public sealed class AppSettings
     /// <summary>剪贴板同步（局域网直连 + WebDAV 兜底，端到端加密），默认关闭</summary>
     public bool ClipboardSyncEnabled { get; set; } = false;
     public string? ClipSyncDeviceId { get; set; }
+
+    /// <summary>控制中心背景色晕缓慢流动（关闭后静止，更省电）</summary>
+    public bool AnimatedBackground { get; set; } = true;
 }
 
 public sealed class RimePreferences

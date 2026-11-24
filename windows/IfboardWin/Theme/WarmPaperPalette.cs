@@ -5,8 +5,15 @@ using IfboardWin.Services;
 
 namespace IfboardWin.Theme;
 
+/// <summary>
+/// 暖纸色板（与 Readly / 手机端同一套令牌）：画布、卡片半透明实色、液态玻璃浮层、--brand-soft 选中底。
+/// 同一深浅状态重复调用时直接跳过，避免每次打开托盘菜单都替换全部画刷、让整窗重新解析资源。
+/// </summary>
 public static class WarmPaperPalette
 {
+    private static bool? _appliedDark;
+    private static ResourceDictionary? _appliedTo;
+
     public static bool IsDarkActive(UiThemeMode mode) => mode switch
     {
         UiThemeMode.Dark => true,
@@ -17,38 +24,41 @@ public static class WarmPaperPalette
     public static void ApplyToResources(ResourceDictionary res, UiThemeMode mode)
     {
         var dark = IsDarkActive(mode);
+        if (_appliedDark == dark && ReferenceEquals(_appliedTo, res)) return;
+        _appliedDark = dark;
+        _appliedTo = res;
 
         SetBrush(res, "WpCanvasBrush", dark ? "#141413" : "#F5F4ED");
-        SetBrush(res, "WpSurfaceBrush", dark ? "#232321" : "#FAF9F5");
-        SetBrush(res, "WpCardBgBrush", dark ? "#EA232321" : "#F5FFFFFF");
+        SetBrush(res, "WpSurfaceBrush", dark ? "#252523" : "#FAF9F5");
+        SetBrush(res, "WpCardBgBrush", dark ? "#DB252523" : "#C7FFFFFF");
         SetBrush(res, "WpCardSubtleBrush", dark ? "#C8292926" : "#EBFAF9F5");
-        SetBrush(res, "WpGlassBgBrush", dark ? "#E81B1B19" : "#EEFAF9F5");
-        SetBrush(res, "WpGlassBorderBrush", dark ? "#26FFFFFF" : "#B0FFFFFF");
-        SetBrush(res, "WpNavPillBgBrush", dark ? "#26FFFFFF" : "#D6F0EEE6");
+        SetBrush(res, "WpGlassBgBrush", dark ? "#B3252523" : "#B8FFFFFF");
+        SetBrush(res, "WpGlassBorderBrush", dark ? "#14FFFFFF" : "#80FFFFFF");
+        SetBrush(res, "WpNavPillBgBrush", dark ? "#14FFFFFF" : "#0F141413");
         SetBrush(res, "WpTextBrush", dark ? "#FAF9F5" : "#141413");
         SetBrush(res, "WpTextSecondaryBrush", dark ? "#C2C0B6" : "#5E5D59");
         SetBrush(res, "WpMutedBrush", dark ? "#9C9A92" : "#87867F");
-        SetBrush(res, "WpDividerBrush", dark ? "#30302E" : "#EFECE3");
-        SetBrush(res, "WpBorderStrongBrush", dark ? "#3A3A36" : "#E3DACC");
-        SetBrush(res, "WpInputBgBrush", dark ? "#1A1A18" : "#FFFFFF");
+        SetBrush(res, "WpDividerBrush", dark ? "#30302E" : "#F0EEE6");
+        SetBrush(res, "WpBorderStrongBrush", dark ? "#3D3D3A" : "#E3DACC");
+        SetBrush(res, "WpInputBgBrush", dark ? "#1C1C1A" : "#FAF9F5");
         SetBrush(res, "WpBrandBrush", "#D97757");
-        SetBrush(res, "WpBrandInkBrush", dark ? "#E68A6B" : "#C6613F");
+        // --brand-ink：浅色下比主题色暗 12%，深色模式直接用 --brand
+        SetBrush(res, "WpBrandInkBrush", dark ? "#D97757" : "#C6613F");
         SetBrush(res, "WpBrandSoftBrush", dark ? "#33D97757" : "#21D97757");
         SetBrush(res, "WpSageBrush", "#7D8B6A");
         SetBrush(res, "WpSageSoftBrush", dark ? "#307D8B6A" : "#227D8B6A");
-        SetBrush(res, "WpErrorBrush", "#B53333");
-        SetBrush(res, "WpErrorSoftBrush", dark ? "#30B53333" : "#1FB53333");
+        SetBrush(res, "WpErrorBrush", dark ? "#D15A5A" : "#B53333");
+        SetBrush(res, "WpErrorSoftBrush", dark ? "#30B53333" : "#14B53333");
         SetBrush(res, "WpAmberBrush", "#D97706");
-        SetBrush(res, "WpSwitchOffTrackBrush", dark ? "#3D3C38" : "#DDD8CC");
-        SetBrush(res, "WpSwitchThumbBrush", "#FAF9F5");
+        SetBrush(res, "WpAmberSoftBrush", dark ? "#24D97706" : "#14D97706");
+        SetBrush(res, "WpSwitchOffTrackBrush", dark ? "#3D3D3A" : "#E3DACC");
+        SetBrush(res, "WpSwitchThumbBrush", "#FFFFFF");
+        SetBrush(res, "WpSegmentOnBrush", dark ? "#3A3A37" : "#FFFFFF");
 
-        res["WpGlow1Color"] = ParseColor(dark ? "#24D97757" : "#3CD97757");
-        res["WpGlow2Color"] = ParseColor(dark ? "#1A7D8B6A" : "#2E7D8B6A");
-        res["WpGlow3Color"] = ParseColor(dark ? "#16D6AA68" : "#28D6AA68");
-
-        SetGlowBrush(res, "WpGlow1Brush", ParseColor(dark ? "#2CD97757" : "#40D97757"));
-        SetGlowBrush(res, "WpGlow2Brush", ParseColor(dark ? "#1E7D8B6A" : "#307D8B6A"));
-        SetGlowBrush(res, "WpGlow3Brush", ParseColor(dark ? "#1AD6AA68" : "#2CD6AA68"));
+        // 背景色晕比 Readly 淡一半：工具界面先保证文字清晰
+        SetGlowBrush(res, "WpGlow1Brush", ParseColor(dark ? "#18D97757" : "#22D97757"));
+        SetGlowBrush(res, "WpGlow2Brush", ParseColor(dark ? "#107D8B6A" : "#1A7D8B6A"));
+        SetGlowBrush(res, "WpGlow3Brush", ParseColor(dark ? "#0ED6AA68" : "#18D6AA68"));
     }
 
     public static Color ParseColor(string hex) =>

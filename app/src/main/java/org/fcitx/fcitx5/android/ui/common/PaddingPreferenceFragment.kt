@@ -145,13 +145,20 @@ abstract class PaddingPreferenceFragment : MyPreferenceFragment() {
             view.background = null
             view.minimumHeight = WarmPaperUi.dp(ctx, 28f)
             view.setPaddingRelative(
-                WarmPaperUi.dp(ctx, 18f),
-                WarmPaperUi.dp(ctx, 10f),
+                WarmPaperUi.dp(ctx, 6f),
+                WarmPaperUi.dp(ctx, 8f),
                 WarmPaperUi.dp(ctx, 18f),
                 WarmPaperUi.dp(ctx, 4f)
             )
+            // 分类标题不给图标留位置，和下方卡片左边对齐
+            hideIconFrame(view)
+            (view.findViewById<TextView>(android.R.id.title)?.parent as? View)?.let {
+                it.setPaddingRelative(0, it.paddingTop, it.paddingEnd, it.paddingBottom)
+                (it.layoutParams as? ViewGroup.MarginLayoutParams)?.marginStart = 0
+            }
+            // 卡片上方的衬线体小标题：17sp、字重 500、正文色（Readly 规范）
             view.findViewById<TextView>(android.R.id.title)?.apply {
-                WarmPaperUi.applySerifTitle(this, sizeSp = 13.5f, useBrandInk = true)
+                WarmPaperUi.applySerifTitle(this, sizeSp = 17f, useBrandInk = false)
                 isSingleLine = false
             }
             return
@@ -170,14 +177,16 @@ abstract class PaddingPreferenceFragment : MyPreferenceFragment() {
             setColor(Color.WHITE)
         }
         view.background = RippleDrawable(ColorStateList.valueOf(p.brandSoft), null, mask)
-        view.minimumHeight = WarmPaperUi.dp(ctx, 46f)
+        view.minimumHeight = WarmPaperUi.dp(ctx, 52f)
         view.setPaddingRelative(
             WarmPaperUi.dp(ctx, 16f),
-            WarmPaperUi.dp(ctx, 10f),
+            WarmPaperUi.dp(ctx, 9f),
             WarmPaperUi.dp(ctx, 16f),
-            WarmPaperUi.dp(ctx, 10f)
+            WarmPaperUi.dp(ctx, 9f)
         )
 
+        // 去掉默认布局里文字区上下各 16dp 的留白，行高回到约 60dp（规范最小 52）
+        (titleView.parent as? View)?.let { it.setPadding(it.paddingLeft, 0, it.paddingRight, 0) }
         titleView.apply {
             setTextColor(p.text)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
@@ -194,6 +203,14 @@ abstract class PaddingPreferenceFragment : MyPreferenceFragment() {
             maxLines = 6
         }
         view.findViewById<View>(android.R.id.widget_frame)?.let { styleSwitchesRecursively(it) }
+    }
+
+    private fun hideIconFrame(row: View) {
+        val ids = listOf(
+            android.R.id.icon_frame,
+            row.resources.getIdentifier("icon_frame", "id", row.context.packageName)
+        ).filter { it != 0 }
+        ids.forEach { id -> row.findViewById<View>(id)?.visibility = View.GONE }
     }
 
     private fun styleSwitchesRecursively(v: View) {
@@ -244,7 +261,7 @@ abstract class PaddingPreferenceFragment : MyPreferenceFragment() {
         private val dark = WarmPaperUi.isDark(ctx)
         private val density = list.resources.displayMetrics.density
         private val side = (14f * density).toInt()
-        private val radius = 18f * density
+        private val radius = 20f * density
         private val dividerInset = 16f * density
 
         private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {

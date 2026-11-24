@@ -269,9 +269,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onStop() {
-        viewModel.fcitx.runIfReady {
-            save()
-        }
+        // 连接已断开（引擎在别处被停止等）时跳过保存，不能让整个应用崩溃
+        runCatching {
+            viewModel.fcitx.runIfReady {
+                save()
+            }
+        }.onFailure { timber.log.Timber.w(it, "skip save on stop") }
         super.onStop()
     }
 

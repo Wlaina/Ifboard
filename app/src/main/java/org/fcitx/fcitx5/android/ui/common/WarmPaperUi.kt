@@ -244,9 +244,10 @@ object WarmPaperUi {
         thumbColor: Int
     ) {
         val ctx = sw.context
-        val radius = dpf(ctx, 13f)
-        val trackW = dp(ctx, 48f)
-        val trackH = dp(ctx, 26f)
+        // 46×28 胶囊开关，22dp 白色圆钮（Readly 规范）
+        val radius = dpf(ctx, 14f)
+        val trackW = dp(ctx, 46f)
+        val trackH = dp(ctx, 28f)
         val checkedTrack = android.graphics.drawable.GradientDrawable().apply {
             shape = android.graphics.drawable.GradientDrawable.RECTANGLE
             cornerRadius = radius
@@ -263,9 +264,9 @@ object WarmPaperUi {
             addState(intArrayOf(android.R.attr.state_checked), checkedTrack)
             addState(intArrayOf(), uncheckedTrack)
         }
-        val thumbSize = dp(ctx, 18f)
+        val thumbSize = dp(ctx, 22f)
         val padH = dp(ctx, 3f)
-        val padV = dp(ctx, 4f)
+        val padV = dp(ctx, 3f)
         val thumbStroke = if (androidx.core.graphics.ColorUtils.calculateLuminance(thumbColor) > 0.7) {
             0x26000000
         } else {
@@ -286,7 +287,7 @@ object WarmPaperUi {
                 return false
             }
         }
-        val minW = dp(ctx, 48f)
+        val minW = dp(ctx, 46f)
         when (sw) {
             is androidx.appcompat.widget.SwitchCompat -> {
                 sw.trackDrawable = track
@@ -325,7 +326,7 @@ object WarmPaperUi {
     fun styleSwitch(sw: CompoundButton) {
         val p = palette(sw.context)
         val dark = isDark(sw.context)
-        val uncheckedTrack = if (dark) 0xFF54534D.toInt() else 0xFFD4CBC0.toInt()
+        val uncheckedTrack = if (dark) 0xFF3D3D3A.toInt() else 0xFFE3DACC.toInt()
         val thumbColor = if (dark) p.text else Color.WHITE
         applyPillSwitchDrawables(sw, p.brand, uncheckedTrack, thumbColor)
     }

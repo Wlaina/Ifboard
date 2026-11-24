@@ -136,6 +136,7 @@ public partial class App : System.Windows.Application
         if (!settings.ShowTaskbarImeIcon)
             _ = Task.Run(() => RimeProcessService.ApplyTaskbarImeIconState(false));
         EnsureImeIconCustomConfigOnStartup(settings);
+        _ = Task.Run(EnsureSelectAllOnStartupAsync);
 
         ConfigureJumpList();
         _ = Task.Run(EnsureSendToShortcut);
@@ -176,21 +177,21 @@ public partial class App : System.Windows.Application
     public void ShowMainWindow()
     {
         _trimCts?.Cancel();
+        _releaseTimer?.Stop();
 
         if (_mainWindow == null)
         {
             var win = new MainWindow();
             win.Closing += (_, args) =>
             {
-                if (_isExplicitExit) return;
+                if (_isExplicitExit || win.ReleaseRequested) return;
 
-                // 若当前有下载或同步任务运行，暂隐窗口保留进度；否则真实销毁释放在线视觉树与 GPU 缓存
+                // 点关闭只是隐藏：几分钟内再打开是秒开；闲置 3 分钟后才真正释放窗口与显存缓存
+                args.Cancel = true;
+                win.Hide();
                 if (win.IsOperationBusy || OperationGate.CurrentCount == 0)
-                {
-                    args.Cancel = true;
-                    win.Hide();
-                    ShowTrayNotification("Ifboard 后台运行中", "当前任务将在后台继续执行，完成后将通过托盘通知您。");
-                }
+                    ShowTrayNotification("Ifboard 后台运行中", "当前任务会在后台继续，完成后在托盘提醒你。");
+                ScheduleHiddenWindowRelease(TimeSpan.FromMinutes(3));
             };
             win.Closed += (_, _) =>
             {
@@ -207,13 +208,30 @@ public partial class App : System.Windows.Application
         ForceForegroundWindow(_mainWindow);
     }
 
-    public void ScheduleHiddenWindowRelease()
+    private DispatcherTimer? _releaseTimer;
+
+    /// <summary>窗口隐藏一段时间（默认 3 分钟）且没有任务在跑时，才真正释放；期间重新打开会取消</summary>
+    public void ScheduleHiddenWindowRelease() => ScheduleHiddenWindowRelease(TimeSpan.FromMinutes(3));
+
+    public void ScheduleHiddenWindowRelease(TimeSpan delay)
     {
         Dispatcher.BeginInvoke(() =>
         {
-            if (_mainWindow is { IsVisible: false } win && !win.IsOperationBusy && OperationGate.CurrentCount > 0)
-                win.Close();
-        }, DispatcherPriority.Background);
+            _releaseTimer?.Stop();
+            _releaseTimer = new DispatcherTimer { Interval = delay };
+            _releaseTimer.Tick += (_, _) =>
+            {
+                _releaseTimer?.Stop();
+                if (_mainWindow is not { IsVisible: false } win) return;
+                if (win.IsOperationBusy || OperationGate.CurrentCount == 0)
+                {
+                    ScheduleHiddenWindowRelease(TimeSpan.FromMinutes(1));
+                    return;
+                }
+                win.ReleaseNow();
+            };
+            _releaseTimer.Start();
+        });
     }
 
     public static void ForceForegroundWindow(Window window)
@@ -305,9 +323,8 @@ public partial class App : System.Windows.Application
                 GC.Collect(1, GCCollectionMode.Optimized, blocking: false);
             }
 
-            using var proc = Process.GetCurrentProcess();
-            _ = EmptyWorkingSet(proc.Handle);
-            _ = SetProcessWorkingSetSize(proc.Handle, -1, -1);
+            // 不再 EmptyWorkingSet：强行把页面清出去，托盘挂久后页面会被换到磁盘，
+            // 再打开窗口 / 右键菜单时要从磁盘读回来，用户感觉明显卡顿。内存紧张时交给系统自己回收。
         }
         catch
         {
@@ -715,7 +732,6 @@ public partial class App : System.Windows.Application
                 menuHost.Close();
                 if (ReferenceEquals(_trayMenuHost, menuHost)) _trayMenuHost = null;
                 if (ReferenceEquals(_trayMenu, menu)) _trayMenu = null;
-                ScheduleTrayTrim(aggressive: false, delayMs: 300);
             }, DispatcherPriority.Background);
         };
 
@@ -965,6 +981,27 @@ public partial class App : System.Windows.Application
         catch
         {
             // 启动自愈检查异常静默忽略
+        }
+    }
+
+    /// <summary>老用户升级后不用手动保存：缺少「打拼音时 Ctrl+A / Ctrl+Z」处理器就补上并部署一次</summary>
+    private async Task EnsureSelectAllOnStartupAsync()
+    {
+        try
+        {
+            await Task.Delay(4000);
+            if (!RimeConfigService.EnsureSelectAllInstalled()) return;
+            await OperationGate.WaitAsync();
+            try { await RimeProcessService.DeployAsync(); }
+            finally
+            {
+                OperationGate.Release();
+                ScheduleTrayTrim(aggressive: false, delayMs: 400);
+            }
+        }
+        catch
+        {
+            // 自愈失败不影响其他功能
         }
     }
 

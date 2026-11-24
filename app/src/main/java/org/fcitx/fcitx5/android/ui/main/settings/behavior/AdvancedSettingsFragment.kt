@@ -24,7 +24,10 @@ import org.fcitx.fcitx5.android.data.prefs.ManagedPreferenceFragment
 import org.fcitx.fcitx5.android.ui.common.withLoadingDialog
 import org.fcitx.fcitx5.android.ui.main.MainViewModel
 import org.fcitx.fcitx5.android.utils.AppUtil
+import org.fcitx.fcitx5.android.utils.addCategory
 import org.fcitx.fcitx5.android.utils.addPreference
+import org.fcitx.fcitx5.android.utils.navigateWithAnim
+import org.fcitx.fcitx5.android.ui.main.settings.SettingsRoute
 import org.fcitx.fcitx5.android.utils.buildDocumentsProviderIntent
 import org.fcitx.fcitx5.android.utils.buildPrimaryStorageIntent
 import org.fcitx.fcitx5.android.utils.formatDateTime
@@ -134,6 +137,16 @@ class AdvancedSettingsFragment : ManagedPreferenceFragment(AppPrefs.getInstance(
                 }
                 .setNegativeButton(android.R.string.cancel, null)
                 .show()
+        }
+        // Ifboard：底层引擎设置平时用不到，从主页挪到这里
+        screen.addCategory("专家选项") {
+            fun entry(@androidx.annotation.StringRes title: Int, summary: String, route: SettingsRoute) =
+                addPreference(getString(title), summary) { navigateWithAnim(route) }
+            entry(R.string.global_options, "Fcitx 引擎的快捷键与默认状态，一般不用改", SettingsRoute.GlobalConfig)
+            entry(R.string.input_methods, "增删输入法（中文 Rime、英文）", SettingsRoute.InputMethodList)
+            entry(R.string.addons, "Fcitx 各个模块的开关与设置", SettingsRoute.AddonList)
+            entry(R.string.plugins, "已安装的扩展插件", SettingsRoute.Plugin)
+            entry(R.string.developer, "调试日志与开发者开关", SettingsRoute.Developer)
         }
     }
 }

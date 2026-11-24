@@ -100,6 +100,7 @@ public static class RimeConfigService
         WriteDefaultCustomYaml(prefs);
         PatchDefaultYamlTabBinding(prefs.TabPageFlip);
         WriteAsciiAutoSpaceLua();
+        WriteSelectAllLua();
         WriteRimeIceCustomYaml(prefs);
         WriteFlypyCustomYaml(prefs);
     }
@@ -141,6 +142,58 @@ public static class RimeConfigService
         var dir = Path.Combine(Paths.RimeUserDir, "lua");
         Directory.CreateDirectory(dir);
         File.WriteAllText(Path.Combine(dir, "ifb_ascii_autospace.lua"), AsciiAutoSpaceLua.Source, new UTF8Encoding(false));
+    }
+
+    /// <summary>写出「打拼音时 Ctrl+A 全选拼音」的 Lua 处理器（始终启用）</summary>
+    private static void WriteSelectAllLua()
+    {
+        var dir = Path.Combine(Paths.RimeUserDir, "lua");
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, SelectAllLua.FileName), SelectAllLua.Source, new UTF8Encoding(false));
+        File.WriteAllText(Path.Combine(dir, SelectAllLua.FilterFileName), SelectAllLua.FilterSource, new UTF8Encoding(false));
+    }
+
+    private static void AppendSelectAllPatch(StringBuilder sb)
+    {
+        sb.AppendLine("  # 打拼音时 Ctrl+A 全选拼音，退格一次删光");
+        sb.AppendLine(SelectAllLua.PatchLine);
+        sb.AppendLine(SelectAllLua.FilterPatchLine);
+    }
+
+    /// <summary>
+    /// 启动时自愈：Lua 文件缺失 / 过期就重写；方案补丁里没有这个处理器就在 patch: 下补一行。
+    /// 返回 true 表示改动了方案补丁，需要重新部署。
+    /// </summary>
+    public static bool EnsureSelectAllInstalled()
+    {
+        if (!Directory.Exists(Paths.RimeUserDir)) return false;
+        var luaPath = Path.Combine(Paths.RimeUserDir, "lua", SelectAllLua.FileName);
+        var filterPath = Path.Combine(Paths.RimeUserDir, "lua", SelectAllLua.FilterFileName);
+        var luaChanged = !File.Exists(luaPath) || File.ReadAllText(luaPath, Encoding.UTF8) != SelectAllLua.Source
+                         || !File.Exists(filterPath) || File.ReadAllText(filterPath, Encoding.UTF8) != SelectAllLua.FilterSource;
+        if (luaChanged) WriteSelectAllLua();
+
+        var patched = false;
+        foreach (var yaml in new[] { Paths.RimeIceCustomYaml, Paths.FlypyCustomYaml })
+        {
+            if (!File.Exists(yaml)) continue;
+            var txt = File.ReadAllText(yaml, Encoding.UTF8);
+            if (txt.Contains(SelectAllLua.Processor, StringComparison.Ordinal) &&
+                txt.Contains(SelectAllLua.Filter, StringComparison.Ordinal)) continue;
+            var m = System.Text.RegularExpressions.Regex.Match(txt, @"^patch:[ \t]*\r?\n", System.Text.RegularExpressions.RegexOptions.Multiline);
+            if (!m.Success) continue;
+            var nl = txt.Contains("\r\n") ? "\r\n" : "\n";
+            var add = "";
+            if (!txt.Contains(SelectAllLua.Processor, StringComparison.Ordinal))
+                add += "  # 打拼音时 Ctrl+A 全选拼音，退格一次删光" + nl + SelectAllLua.PatchLine + nl;
+            if (!txt.Contains(SelectAllLua.Filter, StringComparison.Ordinal))
+                add += SelectAllLua.FilterPatchLine + nl;
+            txt = txt.Insert(m.Index + m.Length, add);
+            File.WriteAllText(yaml, txt, new UTF8Encoding(false));
+            patched = true;
+        }
+        // Lua 内容变了也要重新部署，Rime 才会重新加载脚本
+        return patched || luaChanged;
     }
 
     private static void AppendAsciiAutoSpacePatch(StringBuilder sb, RimePreferences prefs)
@@ -246,6 +299,7 @@ public static class RimeConfigService
             AppendGrammarPatch(sb);
         sb.AppendLine($"  translator/enable_correction: {(prefs.EnableCorrection ? "true" : "false")}");
         AppendAsciiAutoSpacePatch(sb, prefs);
+        AppendSelectAllPatch(sb);
         AppendSwitches(sb, prefs);
 
         if (prefs.FuzzyEnEng || prefs.FuzzyInIng || prefs.FuzzyZhChSh)
@@ -282,6 +336,7 @@ public static class RimeConfigService
             AppendGrammarPatch(sb);
         sb.AppendLine($"  translator/enable_correction: {(prefs.EnableCorrection ? "true" : "false")}");
         AppendAsciiAutoSpacePatch(sb, prefs);
+        AppendSelectAllPatch(sb);
 
         AppendSwitches(sb, prefs);
 

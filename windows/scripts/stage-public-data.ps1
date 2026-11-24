@@ -90,6 +90,14 @@ Get-ChildItem $defaultsDir -Force | ForEach-Object {
     }
 }
 
+# 6b. Ctrl+A 全选拼音的 Lua 处理器：从 SelectAllLua.cs 取同一份源码，避免两处维护
+$selectAllCs = [System.IO.File]::ReadAllText((Join-Path $RepoRoot "IfboardWin\Services\SelectAllLua.cs"), [System.Text.UTF8Encoding]::new($false))
+foreach ($pair in @(@('Source', 'ifb_select_all.lua'), @('FilterSource', 'ifb_select_all_filter.lua'))) {
+    $luaMatch = [regex]::Match($selectAllCs, "(?<![A-Za-z])$($pair[0]) = """"""\r?\n(?<body>[\s\S]*?)\r?\n"""""";")
+    if (-not $luaMatch.Success) { throw "没能从 SelectAllLua.cs 取出 $($pair[0])" }
+    $luaBody = $luaMatch.Groups["body"].Value -replace "`r`n", "`n"
+    [System.IO.File]::WriteAllText((Join-Path $stageDir "lua\$($pair[1])"), $luaBody + "`n", [System.Text.UTF8Encoding]::new($false))
+}
 # 7. 严格的个人隐私泄露审计
 Write-Host "[Ifboard Audit] 正在扫描公开版打包目录隐私项..." -ForegroundColor Cyan
 $forbiddenNames = @("*.userdb*", "installation.yaml", "user.yaml", "webdav*")
