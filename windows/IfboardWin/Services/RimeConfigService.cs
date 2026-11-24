@@ -85,7 +85,10 @@ public static class RimeConfigService
         {
             var flypyTxt = File.ReadAllText(Paths.FlypyCustomYaml, Encoding.UTF8);
             prefs.KeepRawFlypyPreedit = flypyTxt.Contains("translator/preedit_format:", StringComparison.Ordinal);
+            prefs.AsciiPunctDefault |= AsciiPunctResetOn(flypyTxt);
         }
+        if (File.Exists(Paths.RimeIceCustomYaml))
+            prefs.AsciiPunctDefault |= AsciiPunctResetOn(File.ReadAllText(Paths.RimeIceCustomYaml, Encoding.UTF8));
 
         return prefs;
     }
@@ -102,6 +105,35 @@ public static class RimeConfigService
     }
 
     private const string AsciiAutoSpaceProcessor = "lua_processor@*ifb_ascii_autospace";
+
+    /// <summary>配置里 ascii_punct 开关是否写了 reset: 1（中文输入默认英文标点）；只看这一项，不会读到下一个开关的 reset</summary>
+    private static bool AsciiPunctResetOn(string yaml) =>
+        System.Text.RegularExpressions.Regex.IsMatch(yaml,
+            @"name:\s*ascii_punct\s*\r?\n(?:[ \t]+(?=[^ \t\-\r\n])(?!reset:)[^\r\n]*\r?\n)*?[ \t]+reset:\s*1\b");
+
+    /// <summary>两个方案共用的开关补丁：中文 / 英文标点默认值按设置写</summary>
+    private static void AppendSwitches(StringBuilder sb, RimePreferences prefs)
+    {
+        sb.AppendLine("  switches:");
+        sb.AppendLine("    - name: ascii_mode");
+        sb.AppendLine("      states: [ 中, Ａ ]");
+        sb.AppendLine("      reset: 0");
+        sb.AppendLine("    - name: ascii_punct");
+        sb.AppendLine("      states: [ ¥, $ ]");
+        // 默认中文标点；设置里勾选「中文输入默认用英文标点」时为 1（Ctrl+. 都可临时切换）
+        sb.AppendLine($"      reset: {(prefs.AsciiPunctDefault ? 1 : 0)}");
+        sb.AppendLine("    - name: traditionalization");
+        sb.AppendLine("      states: [ 简, 繁 ]");
+        sb.AppendLine("    - name: emoji");
+        sb.AppendLine("      states: [ 💀, 😄 ]");
+        sb.AppendLine("      reset: 1");
+        sb.AppendLine("    - name: full_shape");
+        sb.AppendLine("      states: [ 半角, 全角 ]");
+        sb.AppendLine("    - name: search_single_char");
+        sb.AppendLine("      states: [正常, 单字]");
+        sb.AppendLine("      abbrev: [词, 单]");
+        sb.AppendLine();
+    }
 
     /// <summary>写出英文模式自动空格的 Lua 处理器（是否启用由方案补丁决定）</summary>
     private static void WriteAsciiAutoSpaceLua()
@@ -214,6 +246,7 @@ public static class RimeConfigService
             AppendGrammarPatch(sb);
         sb.AppendLine($"  translator/enable_correction: {(prefs.EnableCorrection ? "true" : "false")}");
         AppendAsciiAutoSpacePatch(sb, prefs);
+        AppendSwitches(sb, prefs);
 
         if (prefs.FuzzyEnEng || prefs.FuzzyInIng || prefs.FuzzyZhChSh)
         {
@@ -250,25 +283,7 @@ public static class RimeConfigService
         sb.AppendLine($"  translator/enable_correction: {(prefs.EnableCorrection ? "true" : "false")}");
         AppendAsciiAutoSpacePatch(sb, prefs);
 
-        sb.AppendLine("  switches:");
-        sb.AppendLine("    - name: ascii_mode");
-        sb.AppendLine("      states: [ 中, Ａ ]");
-        sb.AppendLine("      reset: 0");
-        sb.AppendLine("    - name: ascii_punct");
-        sb.AppendLine("      states: [ ¥, $ ]");
-        // 中文输入默认用中文标点（Ctrl+. 可临时切换）
-        sb.AppendLine("      reset: 0");
-        sb.AppendLine("    - name: traditionalization");
-        sb.AppendLine("      states: [ 简, 繁 ]");
-        sb.AppendLine("    - name: emoji");
-        sb.AppendLine("      states: [ 💀, 😄 ]");
-        sb.AppendLine("      reset: 1");
-        sb.AppendLine("    - name: full_shape");
-        sb.AppendLine("      states: [ 半角, 全角 ]");
-        sb.AppendLine("    - name: search_single_char");
-        sb.AppendLine("      states: [正常, 单字]");
-        sb.AppendLine("      abbrev: [词, 单]");
-        sb.AppendLine();
+        AppendSwitches(sb, prefs);
 
         if (prefs.KeepRawFlypyPreedit)
         {

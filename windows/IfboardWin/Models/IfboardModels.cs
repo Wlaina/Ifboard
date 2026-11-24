@@ -101,6 +101,9 @@ public sealed class RimePreferences
 
     /// <summary>英文模式（ascii_mode）下输入「.」「,」后，在下一个单词前自动补空格</summary>
     public bool AsciiAutoSpace { get; set; }
+
+    /// <summary>中文输入默认用英文标点（ascii_punct 开启）；默认关闭＝中文标点，Ctrl+. 可临时切换</summary>
+    public bool AsciiPunctDefault { get; set; }
 }
 
 public sealed record WeaselColorSchemeSpec(

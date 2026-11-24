@@ -629,6 +629,22 @@
                                                   Checked="InputControl_Changed" Unchecked="InputControl_Changed" />
                                     </Grid>
 
+                                    <Border Style="{StaticResource CardDividerStyle}" />
+
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="中文输入默认用英文标点" Style="{StaticResource RowTitleStyle}" />
+                                            <TextBlock Text="关闭时中文输入打出中文标点（，。？）；开启后默认打英文标点（, . ?）。两种情况下都可以按 Ctrl+. 临时切换（需重新部署生效）。"
+                                                       Style="{StaticResource RowDescStyle}" />
+                                        </StackPanel>
+                                        <CheckBox x:Name="AsciiPunctDefaultCheck" Grid.Column="1" Style="{StaticResource PillSwitchStyle}"
+                                                  Checked="InputControl_Changed" Unchecked="InputControl_Changed" />
+                                    </Grid>
+
                                     <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
                                         <Button x:Name="ApplyRimeBtn" Style="{StaticResource BrandButtonStyle}"
                                                 Content="保存输入方案并部署生效"

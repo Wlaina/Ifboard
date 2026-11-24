@@ -128,6 +128,7 @@ public partial class MainWindow : Window
             TabPageFlipCheck.IsChecked = _rimePrefs.TabPageFlip;
             EnableCorrectionCheck.IsChecked = _rimePrefs.EnableCorrection;
             AsciiAutoSpaceCheck.IsChecked = _rimePrefs.AsciiAutoSpace;
+            AsciiPunctDefaultCheck.IsChecked = _rimePrefs.AsciiPunctDefault;
 
             // 外观设定
             UiAutoRadio.IsChecked = _settings.UiMode == UiThemeMode.Auto;
@@ -658,7 +659,8 @@ public partial class MainWindow : Window
         TabPageFlip = TabPageFlipCheck.IsChecked == true,
         GrammarEnabled = GrammarEnabledCheck.IsChecked == true,
         EnableCorrection = EnableCorrectionCheck.IsChecked == true,
-        AsciiAutoSpace = AsciiAutoSpaceCheck.IsChecked == true
+        AsciiAutoSpace = AsciiAutoSpaceCheck.IsChecked == true,
+        AsciiPunctDefault = AsciiPunctDefaultCheck.IsChecked == true
     };
 
     private void AppOptionCheck_Changed(object sender, RoutedEventArgs e)
