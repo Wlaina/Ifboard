@@ -52,4 +52,4 @@ dotnet publish .\IfboardWin\IfboardWin.csproj -c Release -r win-x64 --self-conta
 & "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" .\installer\IfboardSetup.iss
 ```
 
-输出产物位于 `dist\Ifboard-Windows-Setup-1.3.3.exe`。
+输出产物位于 `dist\Ifboard-Windows-Setup-1.3.4.exe`。
