@@ -132,8 +132,11 @@ class InputWindowManager : UniqueViewComponent<InputWindowManager, FrameLayout>(
         if (currentWindow != null) {
             val oldWindow = currentWindow!!
             val oldView = currentView!!
-            riseIn = !disableAnimation && window.animateEnter(oldWindow)
-            prepareAnimation(
+            // 只在真正换面板（如表情 → 键盘）时播放上升动画；同一个面板重新挂上（换输入框、应用重启输入）
+            // 不播放，否则在微信等应用里每次发送 / 切换输入框都会重放一遍「打开」动画
+            riseIn = !disableAnimation && window !== oldWindow && window.animateEnter(oldWindow)
+            // 同一个面板重新挂上：连淡入淡出也不要，界面保持不动
+            if (window !== oldWindow) prepareAnimation(
                 oldWindow.exitAnimation(window),
                 if (riseIn) null else window.enterAnimation(oldWindow),
                 oldView,

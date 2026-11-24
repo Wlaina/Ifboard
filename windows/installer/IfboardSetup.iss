@@ -1,5 +1,5 @@
 #define MyAppName "Ifboard for Windows"
-#define MyAppVersion "1.3.2"
+#define MyAppVersion "1.3.3"
 #define MyAppPublisher "Ifboard"
 #define MyAppURL "https://github.com/Wlaina/Ifboard"
 #define MyAppExeName "IfboardWin.exe"
@@ -60,6 +60,8 @@ Source: "..\installer-assets\weasel-0.17.4.0-installer.exe"; DestDir: "{tmp}"; F
 Name: "{group}\Ifboard 控制中心"; Filename: "{app}\{#MyAppExeName}"
 Name: "{group}\卸载 Ifboard"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\Ifboard 控制中心"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+; 资源管理器右键「发送到 → Ifboard 手机」：把文件加密发送到手机（手机弹出键盘或点「接收文件」时送达）
+Name: "{usersendto}\Ifboard 手机"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--send"; IconFilename: "{app}\{#MyAppExeName}"
 
 [Run]
 Filename: "{tmp}\weasel-0.17.4.0-installer.exe"; Parameters: "/S"; StatusMsg: "正在安装小狼毫输入法引擎 (Weasel 0.17.4)..."; Flags: waituntilterminated

@@ -22,7 +22,7 @@ namespace IfboardWin.Services;
 /// · WebDAV 兜底：没有手机在线时，复制内容加密写入 clip-*.dat；轮询手机写入的内容（自适应 20~60 秒）。
 /// 空闲时只有监听线程与剪贴板事件，几乎不占资源。
 /// </summary>
-public sealed class ClipboardSyncService : IDisposable
+public sealed partial class ClipboardSyncService : IDisposable
 {
     public const int TcpPort = 47321;
     public const int UdpPort = 47322;
@@ -104,6 +104,12 @@ public sealed class ClipboardSyncService : IDisposable
         public string DeviceId { get; set; } = "";
         public SemaphoreSlim WriteLock { get; } = new(1, 1);
         public ConcurrentDictionary<string, TaskCompletionSource> PendingAcks { get; } = new();
+        /// <summary>主动发送文件：发送中的等待状态 / 接收中的文件</summary>
+        public ConcurrentDictionary<string, XferWait> Xfers { get; } = new();
+        public ConcurrentDictionary<string, Incoming> Incoming { get; } = new();
+        public volatile bool Sending;
+        /// <summary>手机版本支持主动收发文件（握手时声明）</summary>
+        public bool CanXfer;
     }
 
     private ClipboardSyncService(ClipSyncKeys keys, WebDavConfig dav, string deviceId, Dispatcher ui)
@@ -681,6 +687,7 @@ public sealed class ClipboardSyncService : IDisposable
             ss.CNonce = first.Str("c")!;
             ss.PeerName = first.Str("name") ?? "手机";
             ss.DeviceId = first.Str("from") ?? "";
+            ss.CanXfer = first.Long("xfer") >= 1;
             _sessions[ss] = 0;
             TouchLan(ss.DeviceId);
             Log($"lan session from {(client.Client.RemoteEndPoint as IPEndPoint)?.Address}");
@@ -702,6 +709,9 @@ public sealed class ClipboardSyncService : IDisposable
                 await SendClipAsync(ss, it, ct);
                 await Task.Delay(60, ct); // 让手机逐条写入剪贴板历史
             }
+
+            // 有排队等着发给手机的文件：在后台发（消息循环要继续读手机的回执）
+            KickOutbox();
 
             while (!ct.IsCancellationRequested)
             {
@@ -727,6 +737,9 @@ public sealed class ClipboardSyncService : IDisposable
                         break;
                     case "bye":
                         return;
+                    default:
+                        await HandleXferAsync(ss, m, ct);
+                        break;
                 }
             }
         }
@@ -737,6 +750,7 @@ public sealed class ClipboardSyncService : IDisposable
         finally
         {
             _sessions.TryRemove(ss, out _);
+            CleanupXfers(ss);
             try { client.Dispose(); } catch { }
             UpdateIdleStatus();
         }

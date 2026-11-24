@@ -256,7 +256,8 @@ public static class RimeConfigService
         sb.AppendLine("      reset: 0");
         sb.AppendLine("    - name: ascii_punct");
         sb.AppendLine("      states: [ ¥, $ ]");
-        sb.AppendLine("      reset: 1");
+        // 中文输入默认用中文标点（Ctrl+. 可临时切换）
+        sb.AppendLine("      reset: 0");
         sb.AppendLine("    - name: traditionalization");
         sb.AppendLine("      states: [ 简, 繁 ]");
         sb.AppendLine("    - name: emoji");

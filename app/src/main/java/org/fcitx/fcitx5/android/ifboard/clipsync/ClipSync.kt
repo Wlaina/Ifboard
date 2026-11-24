@@ -117,6 +117,10 @@ object ClipSync {
         /** 最近一次收到电脑消息的时间：电脑每次心跳都会回应，太久没消息说明是「半开」的死连接 */
         @Volatile
         var lastRecvMs = System.currentTimeMillis()
+
+        /** 主动发送文件：发送中的等待状态 / 接收中的文件 */
+        val xfers = ConcurrentHashMap<String, XferWait>()
+        val incoming = ConcurrentHashMap<String, Incoming>()
     }
 
     @Volatile
@@ -514,7 +518,9 @@ object ClipSync {
             writeMsg(
                 output, keys, ClipMessage.of(
                     "hello", "s" to s, "c" to c, "from" to deviceId(), "name" to Build.MODEL,
-                    "last" to sp.getString(PREF_LAST_PC, "")
+                    "last" to sp.getString(PREF_LAST_PC, ""),
+                    // 声明支持主动收发文件（旧版不带，电脑就不会给它发文件）
+                    "xfer" to 1
                 )
             )
             socket.soTimeout = 0
@@ -542,6 +548,7 @@ object ClipSync {
                         applyRemote(m, "局域网")
                     }
                     "ack" -> m.str("id")?.let { pendingAcks[it]?.complete(Unit) }
+                    else -> handleXfer(s, m)
                 }
             }
         } catch (_: Exception) {
@@ -580,9 +587,12 @@ object ClipSync {
     )
 
     private fun dropSession(s: Session) {
-        val wasCurrent = session === s && s.alive
+        val wasAlive = s.alive
+        val wasCurrent = session === s && wasAlive
         s.alive = false
         runCatching { s.socket.close() }
+        // 任何一条连接断开都要收尾它的传输（旧连接也可能还挂着接收中的文件），否则计数不归零、键盘收起后不会断开
+        if (wasAlive) cleanupXfers(s)
         if (session === s) {
             session = null
             if (isEnabled()) setStatus("已断开，正在重连")
@@ -618,7 +628,10 @@ object ClipSync {
         closeJob?.cancel()
         closeJob = scope.launch {
             delay(IDLE_CLOSE_MS)
-            if (!keyboardVisible) closeSession()
+            // 正在收发文件或刚点了「接收文件」：再等一轮
+            if (!keyboardVisible) {
+                if (keepOpen()) scheduleIdleClose() else closeSession()
+            }
         }
     }
 
@@ -855,6 +868,378 @@ object ClipSync {
                 }
             }.onFailure { Timber.w(it, "clip sync: pull failed") }
             Timber.i("clip sync: dav pull done")
+        }
+    }
+
+    // ------------------------------------------------------------------ 主动发送文件（类似 LocalSend）
+    //
+    // 走同一条加密连接，分块传输、断点续传、整文件 SHA-256 校验；与 windows/IfboardWin/Services/FileTransfer.cs 一致：
+    //   发送方 fbeg{id,name,size,sha,mime} → 接收方 fok{id,off}（off < 0 拒收，附 why）
+    //   发送方 fdat{id,off}+正文（≤ 512 KB）→ 接收方 fack{id,off}；发送方最多领先 6 块
+    //   发送方 fend{id} → 接收方 fdone{id,ok,file}
+
+    private const val CHUNK = 512 * 1024
+    private const val WINDOW_CHUNKS = 6
+    private const val XFER_STEP_MS = 30_000L
+
+    private class XferWait {
+        val ready = CompletableDeferred<Pair<Long, String?>>()
+        val done = CompletableDeferred<Boolean>()
+        val acked = java.util.concurrent.atomic.AtomicLong(0)
+        val progress = kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
+    }
+
+    private class Incoming(
+        val id: String, val name: String, val mime: String, val size: Long, val sha: String,
+        val part: File, val out: java.io.FileOutputStream, val md: MessageDigest, var got: Long, val peer: String
+    ) {
+        var lastUi = 0L
+    }
+
+    /** 正在进行的传输数：有传输时不因键盘收起而断开 */
+    private val activeTransfers = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /** 点了「接收文件」后保持连接到这个时间 */
+    @Volatile
+    private var holdUntilMs = 0L
+
+    private fun keepOpen() = activeTransfers.get() > 0 || System.currentTimeMillis() < holdUntilMs
+
+    private fun xmsg(s: Session, op: String, vararg pairs: Pair<String, Any?>, body: ByteArray = ByteArray(0)) =
+        ClipMessage.of(op, "s" to s.s, "c" to s.c, *pairs, body = body)
+
+    /** 连接里收到的文件传输消息（在读取线程里执行） */
+    private fun handleXfer(s: Session, m: ClipMessage) {
+        val id = m.str("id") ?: return
+        when (m.op) {
+            "fok" -> s.xfers[id]?.ready?.complete(m.long("off") to m.str("why"))
+            "fack" -> s.xfers[id]?.let {
+                it.acked.set(m.long("off"))
+                it.progress.trySend(Unit)
+            }
+            "fdone" -> s.xfers[id]?.done?.complete(
+                (m.header["ok"] as? kotlinx.serialization.json.JsonPrimitive)?.content == "true"
+            )
+            "fbeg" -> beginIncoming(s, m, id)
+            "fdat" -> {
+                val inc = s.incoming[id]
+                if (inc != null && m.long("off") == inc.got) {
+                    inc.out.write(m.body)
+                    inc.md.update(m.body)
+                    inc.got += m.body.size
+                    val now = System.currentTimeMillis()
+                    if (now - inc.lastUi > 700) {
+                        inc.lastUi = now
+                        val pct = (inc.got * 100 / inc.size.coerceAtLeast(1)).toInt()
+                        XferNotifier.progress(app, inc.id.hashCode(), "正在接收 ${inc.peer} 的文件", inc.name, pct)
+                    }
+                }
+                send(s, xmsg(s, "fack", "id" to id, "off" to (s.incoming[id]?.got ?: -1L)))
+            }
+            "fend" -> finishIncoming(s, id)
+        }
+    }
+
+    private fun beginIncoming(s: Session, m: ClipMessage, id: String) {
+        val size = m.long("size")
+        val sha = m.str("sha")?.lowercase().orEmpty()
+        val name = safeFileName(m.str("name") ?: "file")
+        val mime = m.str("mime") ?: "application/octet-stream"
+        fun reject(why: String) {
+            Timber.i("clip sync: file rejected (%s)", why)
+            send(s, xmsg(s, "fok", "id" to id, "off" to -1L, "why" to why))
+        }
+        if (id.length < 16 || !id.all { it in '0'..'9' || it in 'a'..'f' } || sha.length != 64 || size < 0) {
+            reject("参数错误")
+            return
+        }
+        // 同一个文件重发（电脑超时后重试）：先收尾旧的那份，计数要一起减掉
+        s.incoming.remove(id)?.let {
+            closeIncoming(it)
+            activeTransfers.decrementAndGet()
+        }
+        try {
+            val dir = File(app.cacheDir, "xfer").apply { mkdirs() }
+            // 7 天都没续传的半截文件：删掉
+            val expire = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000
+            dir.listFiles()?.forEach { if (it.name.endsWith(".part") && it.lastModified() < expire) it.delete() }
+            val part = File(dir, "$id.part")
+            var have = if (part.exists()) part.length() else 0L
+            if (have > size) {
+                part.delete(); have = 0L
+            }
+            // 先收到缓存，校验后再复制到「下载」，所以要两份空间
+            if (dir.usableSpace < (size - have) + size + 64L * 1024 * 1024) {
+                reject("手机存储空间不足")
+                return
+            }
+            val md = MessageDigest.getInstance("SHA-256")
+            if (have > 0) part.inputStream().use { input ->
+                val buf = ByteArray(CHUNK)
+                while (true) {
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    md.update(buf, 0, n)
+                }
+            }
+            val inc = Incoming(id, name, mime, size, sha, part, java.io.FileOutputStream(part, true), md, have, s.peerName)
+            s.incoming[id] = inc
+            activeTransfers.incrementAndGet()
+            closeJob?.cancel()
+            Timber.i("clip sync: receiving file %dB (resume at %d)", size, have)
+            send(s, xmsg(s, "fok", "id" to id, "off" to have))
+            XferNotifier.progress(app, id.hashCode(), "正在接收 ${s.peerName} 的文件", name, (have * 100 / size.coerceAtLeast(1)).toInt())
+        } catch (e: Exception) {
+            Timber.w(e, "clip sync: begin receive failed")
+            reject("手机无法保存：${e.message}")
+        }
+    }
+
+    private fun finishIncoming(s: Session, id: String) {
+        val inc = s.incoming.remove(id)
+        if (inc == null) {
+            send(s, xmsg(s, "fdone", "id" to id, "ok" to false))
+            return
+        }
+        activeTransfers.decrementAndGet()
+        runCatching { inc.out.close() }
+        val actual = hex(inc.md.digest())
+        if (inc.got != inc.size || actual != inc.sha) {
+            inc.part.delete()
+            send(s, xmsg(s, "fdone", "id" to id, "ok" to false))
+            XferNotifier.failed(app, id.hashCode(), "文件接收失败", "${inc.name}：校验不通过，请重新发送")
+        } else {
+            runCatching { publishDownload(inc.part, inc.name, inc.mime) }
+                .onSuccess { uri ->
+                    inc.part.delete()
+                    Timber.i("clip sync: received file %dB", inc.size)
+                    send(s, xmsg(s, "fdone", "id" to id, "ok" to true, "file" to inc.name))
+                    setStatus("已收到 ${inc.peer} 的文件 ${inc.name}（下载/Ifboard）")
+                    XferNotifier.received(app, id.hashCode(), inc.peer, inc.name, uri, inc.mime)
+                }
+                .onFailure {
+                    Timber.w(it, "clip sync: save received file failed")
+                    send(s, xmsg(s, "fdone", "id" to id, "ok" to false))
+                    XferNotifier.failed(app, id.hashCode(), "文件保存失败", "${inc.name}：${it.message}")
+                }
+        }
+        if (!keyboardVisible) scheduleIdleClose()
+    }
+
+    private fun closeIncoming(inc: Incoming) {
+        runCatching { inc.out.close() }
+    }
+
+    /** 连接断开：保留已收到的部分（下次续传），唤醒等待中的发送 */
+    private fun cleanupXfers(s: Session) {
+        s.incoming.values.forEach {
+            closeIncoming(it)
+            activeTransfers.decrementAndGet()
+            XferNotifier.failed(app, it.id.hashCode(), "文件接收中断", "${it.name}：连接断开，电脑会在下次连上时接着发")
+        }
+        s.incoming.clear()
+        s.xfers.values.forEach {
+            it.ready.complete(-1L to "连接已断开")
+            it.done.complete(false)
+            it.progress.trySend(Unit)
+        }
+    }
+
+    /** 收到的文件放进「下载/Ifboard」（Android 10 起用 MediaStore，无需存储权限） */
+    private fun publishDownload(part: File, name: String, mime: String): Uri {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val cr = app.contentResolver
+            val values = android.content.ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+                put(MediaStore.MediaColumns.MIME_TYPE, mime)
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "${android.os.Environment.DIRECTORY_DOWNLOADS}/Ifboard")
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+            val uri = cr.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: error("MediaStore insert failed")
+            try {
+                cr.openOutputStream(uri)?.use { out -> part.inputStream().use { it.copyTo(out, CHUNK) } }
+                    ?: error("open output failed")
+                cr.update(uri, android.content.ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+            } catch (e: Exception) {
+                cr.delete(uri, null, null)
+                throw e
+            }
+            return uri
+        }
+        val dir = File(app.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS), "Ifboard").apply { mkdirs() }
+        val stem = name.substringBeforeLast('.', name)
+        val ext = if (name.contains('.')) "." + name.substringAfterLast('.') else ""
+        var target = File(dir, name)
+        var i = 1
+        while (target.exists()) target = File(dir, "$stem ($i)$ext").also { i++ }
+        part.copyTo(target)
+        return FileProvider.getUriForFile(app, "${app.packageName}.clipimage", target)
+    }
+
+    class SendResult(val ok: Int, val failed: Int, val message: String)
+
+    /**
+     * 分享菜单「发送到电脑」：逐个发送文件，progress(序号, 总数, 文件名, 百分比)。
+     * 连不上电脑时，小文件（合计 ≤ 20 MB）改为经网盘中转（会出现在电脑的「下载\Ifboard」与剪贴板）。
+     */
+    suspend fun sendFiles(uris: List<Uri>, progress: (Int, Int, String, Int) -> Unit): SendResult =
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+            if (!isEnabled()) return@withContext SendResult(0, uris.size, "请先在键盘菜单里开启「剪贴板同步」（发送文件走同一条加密连接）")
+            lastLanFailMs = 0L // 用户主动发送：马上重新找电脑
+            val s = ensureSession() ?: return@withContext fallbackDav(uris)
+            activeTransfers.incrementAndGet()
+            closeJob?.cancel()
+            var ok = 0
+            var failed = 0
+            var lastErr: String? = null
+            try {
+                for ((i, uri) in uris.withIndex()) {
+                    try {
+                        sendOne(s, uri, i + 1, uris.size, progress)
+                        ok++
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        failed++
+                        lastErr = e.message
+                        Timber.w(e, "clip sync: send file failed")
+                        if (!s.alive) {
+                            failed += uris.size - i - 1
+                            break
+                        }
+                    }
+                }
+            } finally {
+                activeTransfers.decrementAndGet()
+                if (!keyboardVisible) scheduleIdleClose()
+            }
+            if (failed == 0) SendResult(ok, 0, "已发送 $ok 个文件到 ${s.peerName}（电脑「下载\\Ifboard」）")
+            else SendResult(ok, failed, "成功 $ok 个，失败 $failed 个：${lastErr ?: "未知错误"}")
+        }
+
+    private suspend fun sendOne(s: Session, uri: Uri, index: Int, count: Int, progress: (Int, Int, String, Int) -> Unit) {
+        val cr = app.contentResolver
+        var name: String? = null
+        runCatching {
+            cr.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                if (c.moveToFirst()) name = c.getString(0)
+            }
+        }
+        val fileName = safeFileName(name ?: uri.lastPathSegment ?: "file")
+        val mime = cr.getType(uri) ?: "application/octet-stream"
+        progress(index, count, fileName, 0)
+        // 先算 SHA-256，同时得到真实大小（部分来源不报告大小）
+        val md = MessageDigest.getInstance("SHA-256")
+        var total = 0L
+        val buf = ByteArray(CHUNK)
+        (cr.openInputStream(uri) ?: error("无法读取 $fileName")).use { input ->
+            while (true) {
+                val n = input.read(buf)
+                if (n < 0) break
+                md.update(buf, 0, n)
+                total += n
+            }
+        }
+        val sha = hex(md.digest())
+        val id = sha.substring(0, 24)
+        val w = XferWait()
+        s.xfers[id] = w
+        try {
+            if (!send(s, xmsg(s, "fbeg", "id" to id, "name" to fileName, "size" to total, "sha" to sha, "mime" to mime)))
+                error("连接已断开")
+            val (off, why) = withTimeoutOrNull(XFER_STEP_MS) { w.ready.await() } ?: error("电脑没有回应")
+            if (off < 0) error(why ?: "电脑拒收")
+            w.acked.set(off)
+            (cr.openInputStream(uri) ?: error("无法读取 $fileName")).use { input ->
+                var skipped = 0L
+                while (skipped < off) {
+                    val n = input.read(buf, 0, minOf(buf.size.toLong(), off - skipped).toInt())
+                    if (n < 0) error("读取文件失败")
+                    skipped += n
+                }
+                var sent = off
+                var lastUi = 0L
+                while (sent < total) {
+                    while (sent - w.acked.get() >= WINDOW_CHUNKS.toLong() * CHUNK) {
+                        withTimeoutOrNull(XFER_STEP_MS) { w.progress.receive() } ?: error("电脑没有回应")
+                        if (!s.alive) error("连接已断开")
+                    }
+                    val want = minOf(CHUNK.toLong(), total - sent).toInt()
+                    var n = 0
+                    while (n < want) {
+                        val r = input.read(buf, n, want - n)
+                        if (r < 0) break
+                        n += r
+                    }
+                    if (n <= 0) error("读取文件失败")
+                    if (!send(s, xmsg(s, "fdat", "id" to id, "off" to sent, body = buf.copyOf(n)))) error("连接已断开")
+                    sent += n
+                    val now = System.currentTimeMillis()
+                    if (now - lastUi > 500) {
+                        lastUi = now
+                        progress(index, count, fileName, (sent * 100 / total.coerceAtLeast(1)).toInt())
+                    }
+                }
+            }
+            if (!send(s, xmsg(s, "fend", "id" to id))) error("连接已断开")
+            val ok = withTimeoutOrNull(120_000L) { w.done.await() } ?: error("电脑没有确认")
+            if (!ok) error("电脑校验失败")
+            progress(index, count, fileName, 100)
+            Timber.i("clip sync: sent file %dB", total)
+        } finally {
+            s.xfers.remove(id)
+        }
+    }
+
+    /** 连不上电脑：小文件经网盘中转（同剪贴板文件同步） */
+    private fun fallbackDav(uris: List<Uri>): SendResult {
+        if (creds() == null) return SendResult(0, uris.size, "没找到电脑：请让手机和电脑连同一网络")
+        val cr = app.contentResolver
+        val items = mutableListOf<Triple<String, String, ByteArray>>()
+        var total = 0L
+        for (uri in uris) {
+            var name: String? = null
+            runCatching {
+                cr.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                    if (c.moveToFirst()) name = c.getString(0)
+                }
+            }
+            val bytes = runCatching {
+                cr.openInputStream(uri)?.use { input ->
+                    val out = java.io.ByteArrayOutputStream()
+                    val b = ByteArray(64 * 1024)
+                    while (true) {
+                        val n = input.read(b)
+                        if (n < 0) break
+                        out.write(b, 0, n)
+                        if (total + out.size() > MAX_DAV_ITEM) return SendResult(
+                            0, uris.size, "没找到电脑，文件合计超过 20 MB，无法经网盘中转：请让手机和电脑连同一网络"
+                        )
+                    }
+                    out.toByteArray()
+                }
+            }.getOrNull() ?: return SendResult(0, uris.size, "无法读取文件")
+            total += bytes.size
+            items += Triple(safeFileName(name ?: uri.lastPathSegment ?: "file"), cr.getType(uri) ?: "application/octet-stream", bytes)
+        }
+        items.forEach { (n, mime, bytes) -> publish(mime, bytes, n) }
+        return SendResult(items.size, 0, "没找到电脑，已经网盘中转 ${items.size} 个文件（电脑会存到「下载\\Ifboard」并放进剪贴板）")
+    }
+
+    /** 通知栏「接收文件」开关：马上连电脑，保持 2 分钟，让电脑排队的文件发过来 */
+    fun receiveNow() {
+        if (!isEnabled()) {
+            main.post { android.widget.Toast.makeText(app, "请先在键盘菜单里开启「剪贴板同步」", android.widget.Toast.LENGTH_SHORT).show() }
+            return
+        }
+        holdUntilMs = System.currentTimeMillis() + 120_000L
+        lastLanFailMs = 0L
+        scope.launch {
+            val s = ensureSession()
+            val msg = if (s != null) "已连上 ${s.peerName}：电脑排队要发的文件会自动收下（保持 2 分钟）"
+            else "没找到电脑：请确认手机和电脑在同一网络"
+            main.post { android.widget.Toast.makeText(app, msg, android.widget.Toast.LENGTH_LONG).show() }
+            if (!keyboardVisible) scheduleIdleClose()
         }
     }
 

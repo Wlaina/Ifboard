@@ -138,14 +138,30 @@ public partial class App : System.Windows.Application
         EnsureImeIconCustomConfigOnStartup(settings);
 
         ConfigureJumpList();
+        _ = Task.Run(EnsureSendToShortcut);
         InitializeTrayIcon();
+        // 文件收发的托盘通知；点通知在资源管理器里选中收到的文件
+        ClipboardSyncService.Notify += (title, text, path) => Dispatcher.BeginInvoke(() =>
+        {
+            _lastNotifyPath = path;
+            ShowTrayNotification(title, text);
+        });
+        if (_trayIcon != null)
+            _trayIcon.BalloonTipClicked += (_, _) =>
+            {
+                var path = _lastNotifyPath;
+                _lastNotifyPath = null;
+                if (path == null || !File.Exists(path)) return;
+                try { Process.Start("explorer.exe", $"/select,\"{path}\""); } catch { }
+            };
         SystemEvents.UserPreferenceChanged += OnSystemPreferenceChanged;
         StartBackgroundMaintenance();
         // 剪贴板同步：仅在用户开启后启动（空闲时只有监听线程，几乎不占资源）
         if (settings.ClipboardSyncEnabled)
             _ = StartClipboardSyncThenTrimAsync();
 
-        var startInTray = e.Args.Any(a => string.Equals(a, "--tray", StringComparison.OrdinalIgnoreCase));
+        var startInTray = e.Args.Any(a => string.Equals(a, "--tray", StringComparison.OrdinalIgnoreCase)) || IsSendCommand(e.Args);
+        if (IsSendCommand(e.Args)) ExecuteStartupCommand(e.Args);
         if (startInTray)
         {
             // 冷启动纯托盘模式下延迟裁剪工作集，保持极低后台占用
@@ -344,8 +360,64 @@ public partial class App : System.Windows.Application
         base.OnSessionEnding(e);
     }
 
+    /// <summary>资源管理器「发送到 → Ifboard 手机」：IfboardWin.exe --send 文件1 文件2 …</summary>
+    private static bool IsSendCommand(string[] args) =>
+        args.Length > 0 && (string.Equals(args[0], "--send", StringComparison.OrdinalIgnoreCase) ||
+                            args[0].StartsWith("--send\t", StringComparison.Ordinal));
+
+    private static IEnumerable<string> SendPaths(string[] args) =>
+        args.Length > 0 && args[0].StartsWith("--send\t", StringComparison.Ordinal)
+            ? args[0].Split('\t').Skip(1)
+            : args.Skip(1);
+
+    private string? _lastNotifyPath;
+
+    /// <summary>
+    /// 给当前登录的用户补上资源管理器右键「发送到 → Ifboard 手机」。安装器以管理员身份运行，
+    /// 用别的管理员账号授权安装时快捷方式会建到那个账号里；这里按当前用户再确认一次。
+    /// 只在从安装目录运行时创建，开发构建不动用户的「发送到」菜单。
+    /// </summary>
+    private static void EnsureSendToShortcut()
+    {
+        try
+        {
+            var exe = Environment.ProcessPath;
+            var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+            if (string.IsNullOrEmpty(exe) || !exe.StartsWith(programFiles, StringComparison.OrdinalIgnoreCase)) return;
+            var sendTo = Environment.GetFolderPath(Environment.SpecialFolder.SendTo);
+            if (string.IsNullOrEmpty(sendTo)) return;
+            var lnk = Path.Combine(sendTo, "Ifboard 手机.lnk");
+            if (File.Exists(lnk)) return;
+            var shellType = Type.GetTypeFromProgID("WScript.Shell");
+            if (shellType == null) return;
+            dynamic shell = Activator.CreateInstance(shellType)!;
+            dynamic sc = shell.CreateShortcut(lnk);
+            sc.TargetPath = exe;
+            sc.Arguments = "--send";
+            sc.IconLocation = exe + ",0";
+            sc.Description = "把文件加密发送到手机（Ifboard）";
+            sc.Save();
+        }
+        catch
+        {
+            // 创建失败不影响其他功能
+        }
+    }
+
     private void ExecuteStartupCommand(string[] args)
     {
+        if (IsSendCommand(args))
+        {
+            var paths = SendPaths(args).ToList();
+            _ = Task.Run(async () =>
+            {
+                // 冷启动时同步服务还在推导密钥：最多等 15 秒
+                for (var i = 0; i < 30 && ClipboardSyncService.Current == null && AppSettingsService.Load().ClipboardSyncEnabled; i++)
+                    await Task.Delay(500);
+                ClipboardSyncService.EnqueueSend(paths);
+            });
+            return;
+        }
         if (args.Any(a => string.Equals(a, "--quit", StringComparison.OrdinalIgnoreCase)))
         {
             ExitApplication();
@@ -387,7 +459,9 @@ public partial class App : System.Windows.Application
 
         var isQuit = args.Any(a => string.Equals(a, "--quit", StringComparison.OrdinalIgnoreCase));
         var cmd = "--show";
-        if (isQuit)
+        if (IsSendCommand(args))
+            cmd = "--send\t" + string.Join("\t", SendPaths(args)); // 文件路径里不可能出现制表符
+        else if (isQuit)
             cmd = "--quit";
         else if (args.Any(a => string.Equals(a, "--sync", StringComparison.OrdinalIgnoreCase)))
             cmd = "--sync";
@@ -400,19 +474,31 @@ public partial class App : System.Windows.Application
         else if (args.Any(a => string.Equals(a, "--deploy", StringComparison.OrdinalIgnoreCase)))
             cmd = "--deploy";
 
-        try
+        // 发送文件要把路径交给正在运行的实例：管道忙时多试几次，失败要告诉用户，不能悄悄丢掉
+        var attempts = IsSendCommand(args) ? 4 : 1;
+        for (var i = 0; i < attempts; i++)
         {
-            using var client = new NamedPipeClientStream(".", IpcPipeName, PipeDirection.Out);
-            client.Connect(800);
-            using var writer = new StreamWriter(client, Encoding.UTF8) { AutoFlush = true };
-            writer.WriteLine(cmd);
+            try
+            {
+                using var client = new NamedPipeClientStream(".", IpcPipeName, PipeDirection.Out);
+                client.Connect(800);
+                using var writer = new StreamWriter(client, Encoding.UTF8) { AutoFlush = true };
+                writer.WriteLine(cmd);
+                return;
+            }
+            catch
+            {
+                if (i + 1 < attempts) Thread.Sleep(300);
+            }
+        }
+        if (isQuit) return;
+        if (IsSendCommand(args))
+        {
+            WinForms.MessageBox.Show("没能把文件交给正在运行的 Ifboard，请稍后重新「发送到 → Ifboard 手机」。",
+                "Ifboard", WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Warning);
             return;
         }
-        catch
-        {
-            if (isQuit) return;
-            // 若 NamedPipe 繁忙或未就绪，回退到事件对象唤醒主窗口
-        }
+        // 若 NamedPipe 繁忙或未就绪，回退到事件对象唤醒主窗口
 
         try
         {

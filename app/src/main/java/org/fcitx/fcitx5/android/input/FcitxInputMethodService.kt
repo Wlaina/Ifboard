@@ -205,7 +205,36 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         return job
     }
 
+    /**
+     * Ifboard: 键盘开着时锁屏再解锁（例如在微信里），系统有时不会重新下发窗口边距，
+     * 键盘就不会再延伸到导航栏后面，底部那条露出透明。亮屏 / 解锁时主动重新请求边距并重设导航栏。
+     * 边距本来就正确时不会有任何变化。
+     */
+    private val screenStateReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+            refreshWindowInsets()
+        }
+    }
+
+    private fun refreshWindowInsets() {
+        window.window?.let { navbarMgr.evaluate(it, inputDeviceMgr.isVirtualKeyboard) }
+        val v = inputView ?: return
+        v.requestApplyInsets()
+        // 解锁动画结束后系统才给出最终边距：稍后再请求一次
+        v.postDelayed({ if (v.isAttachedToWindow) v.requestApplyInsets() }, 400)
+    }
+
     override fun onCreate() {
+        runCatching {
+            androidx.core.content.ContextCompat.registerReceiver(
+                this, screenStateReceiver,
+                android.content.IntentFilter().apply {
+                    addAction(android.content.Intent.ACTION_USER_PRESENT)
+                    addAction(android.content.Intent.ACTION_SCREEN_ON)
+                },
+                androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
+            )
+        }
         fcitx = FcitxDaemon.connect(javaClass.name)
         lifecycleScope.launch {
             jobs.consumeEach { it.join() }
@@ -506,6 +535,157 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
 
     /** Ifboard: 自动补在「.」「,」后面的空格所在的光标位置（-1 表示没有） */
     private var autoSpaceCursor = -1
+
+    /** Ifboard: 自动加在「.」后面的那个空格的位置（-1 表示没有）；之后边打边判断后面的词是不是网址后缀 */
+    private var dotSpaceAt = -1
+
+    /** 已经因为网址后缀撤回了那个空格（x.com），这时 [dotSpaceAt] 是后缀第一个字母的位置 */
+    private var dotSpaceJoined = false
+
+    /** 撤回时后缀首字母是大写（句首自动大写成的 Com）：补回空格时恢复大写 */
+    private var dotSpaceJoinedCap = false
+
+    private fun resetDomainTracking() {
+        dotSpaceAt = -1
+        dotSpaceJoined = false
+        dotSpaceJoinedCap = false
+    }
+
+    private fun isAsciiWord(w: String) = w.isNotEmpty() && w.all { it in 'a'..'z' || it in 'A'..'Z' }
+
+    /** 当前是英文输入（键盘布局类输入法，不是拼音 / 双拼等） */
+    private fun isEnglishInput(): Boolean = runCatching {
+        val entry = fcitx.runImmediately { inputMethodEntryCached }
+        entry.uniqueName.startsWith("keyboard")
+    }.getOrDefault(false)
+
+    /** 是不是网址后缀：不是英文单词的后缀（com / org / cn …）全小写或首字母大写都认；net / info 等只认全小写 */
+    private fun isDomainTld(word: String): Boolean {
+        if (!isAsciiWord(word)) return false
+        val lower = word.lowercase()
+        val capitalized = word[0].isUpperCase() && word.substring(1) == word.substring(1).lowercase()
+        return when {
+            lower in DomainTlds -> word == lower || capitalized
+            lower in DomainTldsLowerOnly -> word == lower
+            else -> false
+        }
+    }
+
+    /**
+     * 组字（英文边打边显示）时的网址后缀判断：组字内容一凑成后缀，就先撤下组字、删掉句点后的自动空格；
+     * 组字内容不再是后缀时补回空格。返回 true 表示改动了组字区（调用方需要重新放上组字内容）。
+     */
+    private fun adjustDomainSpaceForComposing(ic: InputConnection, preedit: String): Boolean {
+        val at = dotSpaceAt
+        if (at < 0) return false
+        // 只在英文输入时判断：拼音的组字（de、ca…）不是网址
+        if (!isAsciiWord(preedit) || !isEnglishInput()) {
+            resetDomainTracking()
+            return false
+        }
+        val cs = if (composing.isEmpty()) selection.latest.start else composing.start
+        val joined = dotSpaceJoined
+        if (cs != (if (joined) at else at + 1)) {
+            resetDomainTracking()
+            return false
+        }
+        // 核对组字区前面确实是「x. 」（撤回前）或「x.」（撤回后）
+        val compLen = (selection.latest.start - cs).coerceAtLeast(0)
+        val b = ic.getTextBeforeCursor(compLen + 3, 0)?.toString().orEmpty().dropLast(compLen)
+        val n = b.length
+        val shapeOk = if (joined) {
+            n >= 2 && b[n - 1] == '.' && b[n - 2].isLetterOrDigit()
+        } else {
+            n >= 3 && b[n - 1] == ' ' && b[n - 2] == '.' && b[n - 3].isLetterOrDigit()
+        }
+        if (!shapeOk) {
+            resetDomainTracking()
+            return false
+        }
+        val tld = isDomainTld(preedit)
+        if (!joined && tld) {
+            if (composing.isNotEmpty()) ic.setComposingText("", 1)
+            ic.deleteSurroundingText(1, 0)
+            composing.clear()
+            selection.predict(cs - 1)
+            dotSpaceJoined = true
+            dotSpaceJoinedCap = preedit[0].isUpperCase()
+            return true
+        }
+        if (joined && !tld) {
+            if (composing.isNotEmpty()) ic.setComposingText("", 1)
+            ic.commitText(" ", 1)
+            composing.clear()
+            selection.predict(cs + 1)
+            dotSpaceJoined = false
+            dotSpaceJoinedCap = false
+            return true
+        }
+        return false
+    }
+
+    /**
+     * 「example. com」→「example.com」，边打边判断：句点后自动加了空格，接着打的字母一凑成网址后缀
+     * （com / org / cn …）就立刻撤回那个空格（马上发送也没问题）；之后再打字母使它不再是后缀
+     * （come、computer），立刻补回空格并恢复原来的大写。
+     * 返回要代替 [text] 提交的文本；null 表示照常提交 [text]。
+     */
+    private fun trackDomainWord(text: String, ic: InputConnection): String? {
+        val at = dotSpaceAt
+        if (at < 0) return null
+        // 打了字母以外的东西（空格、标点、数字…）：这个词结束，不再跟踪
+        if (!isAsciiWord(text) || composing.isNotEmpty()) {
+            resetDomainTracking()
+            return null
+        }
+        val cursor = selection.latest.start
+        if (selection.latest.end != cursor) {
+            resetDomainTracking()
+            return null
+        }
+        val wordStart = if (dotSpaceJoined) at else at + 1
+        val existingLen = cursor - wordStart
+        if (existingLen !in 0..12) {
+            resetDomainTracking()
+            return null
+        }
+        // 撤回前：「x. 词」；撤回后：「x.词」——核对光标前的文字确实是这个样子（防止光标挪走后误改）
+        val before = ic.getTextBeforeCursor(existingLen + 3, 0)?.toString().orEmpty()
+        val n = before.length
+        val shapeOk = when {
+            dotSpaceJoined -> n >= existingLen + 2 && before[n - existingLen - 1] == '.' &&
+                before[n - existingLen - 2].isLetterOrDigit()
+            else -> n >= existingLen + 3 && before[n - existingLen - 1] == ' ' &&
+                before[n - existingLen - 2] == '.' && before[n - existingLen - 3].isLetterOrDigit()
+        }
+        val existing = before.takeLast(existingLen)
+        if (!shapeOk || (existingLen > 0 && !isAsciiWord(existing))) {
+            resetDomainTracking()
+            return null
+        }
+        val word = existing + text
+        if (!dotSpaceJoined) {
+            if (!isDomainTld(word)) return null // 还不是后缀：继续等
+            // 凑成后缀：撤回空格，后缀改小写
+            dotSpaceJoinedCap = word[0].isUpperCase()
+            dotSpaceJoined = true
+            ic.deleteSurroundingText(existingLen + 1, 0)
+            selection.predict(cursor - existingLen - 1)
+            return word.lowercase()
+        }
+        if (isDomainTld(word.lowercase())) return text.lowercase() // 仍是后缀（如 co → com 之类）
+        // 不再是后缀（come、computer）：补回空格，恢复原来的大写
+        dotSpaceJoined = false
+        val restored = if (dotSpaceJoinedCap && existing.isNotEmpty()) {
+            existing.replaceFirstChar { it.uppercaseChar() }
+        } else {
+            existing
+        }
+        dotSpaceJoinedCap = false
+        ic.deleteSurroundingText(existingLen, 0)
+        selection.predict(cursor - existingLen)
+        return " $restored$text"
+    }
     private val autoSpaceAfterPeriod by prefs.keyboard.autoSpaceAfterPeriod
 
     private fun editorAllowsAutoSpace(): Boolean {
@@ -521,8 +701,12 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
             InputType.TYPE_TEXT_VARIATION_FILTER -> false
             else -> {
                 val info = currentInputEditorInfo
-                // 登录 / 账号类输入框几乎都会关掉输入建议：这类框里不自动加空格
-                if (type and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS != 0) return false
+                // 登录 / 账号类输入框几乎都会关掉输入建议，而且是单行、不要句首大写和自动更正。
+                // Gemini / Google 搜索等聊天框也关了输入建议，但它们是多行、要求句首大写 / 自动更正，照常加空格
+                val proseHints = InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_IME_MULTI_LINE or
+                    InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or InputType.TYPE_TEXT_FLAG_CAP_WORDS or
+                    InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
+                if (type and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS != 0 && type and proseHints == 0) return false
                 // 很多 App 与网页的账号框只是普通文本框：按提示文字识别邮箱 / 账号 / 密码 / 网址
                 val hint = listOfNotNull(info?.hintText, info?.label).joinToString(" ")
                 !AccountFieldHint.containsMatchIn(hint)
@@ -540,6 +724,11 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         val all = existing + text.dropLast(1)
         val token = all.takeLastWhile { !it.isWhitespace() }
         if (token.any { it == '@' || it == '/' || it == ':' || it == '\\' }) return true
+        // 网址：www. / http 开头，或这串字符里已经有一个点（mail.google. 的第二个点）
+        if (token.startsWith("www", ignoreCase = true) || token.startsWith("http", ignoreCase = true)) return true
+        if (token.length >= 3 && token.contains('.') &&
+            token.substringAfterLast('.').let { it.length >= 2 && it.all { c -> c.isLetterOrDigit() || c == '-' } }
+        ) return true
         val type = currentInputEditorInfo?.inputType ?: 0
         val multiLine = type and (InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_IME_MULTI_LINE) != 0
         val reachedStart = existing.length < AccountScanChars && beforeStart <= existing.length
@@ -555,6 +744,20 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         val prevAuto = autoSpaceCursor
         autoSpaceCursor = -1
         if (!autoSpaceAfterPeriod || text.isEmpty()) return text
+        if (dotSpaceAt >= 0 && composing.isNotEmpty()) {
+            // 组字的词上屏，这个词结束：
+            //  · 已撤回空格且上屏的正是网址后缀：统一小写（句首自动大写成的 Com → com）
+            //  · 已撤回空格但上屏的是别的词（选了联想词 company、拼音上屏「的」）：把空格补回去
+            val joined = dotSpaceJoined
+            resetDomainTracking()
+            if (joined) return if (isDomainTld(text)) text.lowercase() else " $text"
+            if (isAsciiWord(text)) return text
+        }
+        if (dotSpaceAt >= 0) {
+            // 句点后自动空格之后正在打的词：凑成网址后缀就立刻撤回空格，不再是后缀就立刻补回
+            trackDomainWord(text, ic)?.let { return it }
+            if (isAsciiWord(text) && dotSpaceAt >= 0) return text
+        }
         val cursorNow = selection.latest.start
         val justAutoSpaced = composing.isEmpty() && prevAuto >= 0 && prevAuto == cursorNow &&
             selection.latest.end == cursorNow
@@ -587,6 +790,8 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
             else -> minOf(selection.latest.start, selection.latest.end)
         }
         autoSpaceCursor = start + text.length + 1
+        resetDomainTracking()
+        if (mark == '.') dotSpaceAt = start + text.length
         return "$text "
     }
 
@@ -765,6 +970,8 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         window.window?.let {
             navbarMgr.evaluate(it, inputDeviceMgr.isVirtualKeyboard)
         }
+        // 键盘重新显示时也确认一次边距（锁屏 / 分屏切换后可能是旧值）
+        inputView?.requestApplyInsets()
         ClipboardManager.syncFromSystemClipboard()
         try {
             highlightColor = styledColorCompat(android.R.attr.colorAccent).alpha(0.4f)
@@ -970,6 +1177,8 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     }
 
     override fun onStartInput(attribute: EditorInfo, restarting: Boolean) {
+        // 换了输入框：不再跟踪上一个框里的网址后缀
+        resetDomainTracking()
         // update selection as soon as possible
         // sometimes when restarting input, onUpdateSelection happens before onStartInput, and
         // initialSel{Start,End} is outdated. but it's the client app's responsibility to send
@@ -1179,9 +1388,11 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     // it's not possible to set cursor inside composing text
     private fun updateComposingText(text: FormattedText) {
         val ic = currentInputConnection ?: return
-        val lastSelection = selection.latest
         ic.beginBatchEdit()
-        if (composingText.spanEquals(text)) {
+        // 英文边打边显示（组字）时：凑成网址后缀就撤回句点后的自动空格，不再是后缀就补回
+        val rewrote = !text.isEmpty() && adjustDomainSpaceForComposing(ic, text.toString())
+        val lastSelection = selection.latest
+        if (!rewrote && composingText.spanEquals(text)) {
             // composing text content is up-to-date
             // update cursor only when it's not empty AND cursor position is valid
             if (text.length > 0 && text.cursor >= 0) {
@@ -1346,6 +1557,7 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     }
 
     override fun onDestroy() {
+        runCatching { unregisterReceiver(screenStateReceiver) }
         inputView?.stopInlineVoice()
         screenshotDebounceJob?.cancel()
         mediaScreenshotObserver?.let { runCatching { contentResolver.unregisterContentObserver(it) } }
@@ -1391,6 +1603,16 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
             RegexOption.IGNORE_CASE
         )
         private const val AutoSpaceGluePunct = ".,;:!?)]}'\""
+
+        /** 网址后缀：都不是英文单词，句首大写的「Com」也认 */
+        private val DomainTlds = setOf(
+            "com", "org", "edu", "gov", "mil", "io", "cn", "hk", "tw", "jp", "kr", "uk", "de", "fr", "nl", "ru",
+            "hu", "pl", "se", "ch", "au", "ca", "eu", "xyz", "icu", "biz", "cz", "sk", "ro", "gr", "pt", "br",
+            "mx", "nz", "sg", "vn", "ua", "tr", "dk", "fi", "ie", "il", "za", "ae"
+        )
+
+        /** 也是英文单词的后缀：只认全小写 */
+        private val DomainTldsLowerOnly = setOf("net", "info", "tv", "cc")
         private const val DeleteAllChunk = 100_000
         const val DeleteSurroundingFlag = "org.fcitx.fcitx5.android.DELETE_SURROUNDING"
     }

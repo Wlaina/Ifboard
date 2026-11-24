@@ -210,6 +210,44 @@
             </intent-filter>
         </receiver>
 
+        <!-- 主动发送文件：系统分享菜单「发送到电脑」、后台发送服务、通知栏「接收文件」开关 -->
+        <activity
+            android:name=".ifboard.clipsync.FileSendActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:icon="@mipmap/app_icon"
+            android:label="发送到电脑"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".ifboard.clipsync.FileSendService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <service
+            android:name=".ifboard.clipsync.ReceiveTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_baseline_sync_24"
+            android:label="接收文件"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.clipimage"

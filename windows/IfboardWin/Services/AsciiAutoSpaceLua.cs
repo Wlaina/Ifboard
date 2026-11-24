@@ -7,20 +7,45 @@ internal static class AsciiAutoSpaceLua
 -- 英文模式下「.」「,」后自动加空格（懒空格）：标点照常上屏，下一个按键是字母时才在它前面补一个空格。
 -- 因此「...」、小数 3.14、千分位 1,000、句末回车或再按空格都不会多出空格；
 -- 句点前只有单个字母（e.g. / U.S.）时不补，逗号前有字母即补。
+-- 网址 / 邮箱 / 文件名不补（电脑上已经打出去的字没法撤回，所以在句点后第一个字母时就判断）：
+--   · 句点后接小写字母（example.com、file.txt，大写锁定时的 EXAMPLE.COM 也算）；接大写字母（新句子 Then）才补；
+--   · 这串字符明显是网址：www / http 开头，含 @ / : ，或前面已有一个点（mail.google.）——大写也不补。
 local function is_alpha(c)
   return (c >= 0x41 and c <= 0x5a) or (c >= 0x61 and c <= 0x7a)
 end
 
-local function init(env)
+local function is_lower(c)
+  return c >= 0x61 and c <= 0x7a
+end
+
+-- 网址里会出现、但不打断这串字符的符号：数字 @ / : - _
+local function is_token_char(c)
+  return (c >= 0x30 and c <= 0x39) or c == 0x40 or c == 0x2f or c == 0x3a or c == 0x2d or c == 0x5f
+end
+
+local function looks_like_url(tok)
+  local t = string.lower(tok)
+  if string.find(t, "@", 1, true) or string.find(t, "/", 1, true) or string.find(t, ":", 1, true) then return true end
+  if string.sub(t, 1, 3) == "www" or string.sub(t, 1, 4) == "http" then return true end
+  return string.find(t, ".", 1, true) ~= nil
+end
+
+local function reset(env)
   env.pending = false
   env.run = 0
+  env.tok = ""
+end
+
+local function init(env)
+  reset(env)
+  env.pending_dot = false
+  env.pending_url = false
 end
 
 local function func(key, env)
   local ctx = env.engine.context
   if not ctx:get_option("ascii_mode") or ctx:is_composing() then
-    env.pending = false
-    env.run = 0
+    reset(env)
     return 2
   end
   if key:release() then return 2 end
@@ -28,33 +53,54 @@ local function func(key, env)
   -- 单独按下的修饰键（Shift / Ctrl / Caps 等）不影响状态
   if code >= 0xffe1 and code <= 0xffee or code == 0xffe5 then return 2 end
   if key:ctrl() or key:alt() or key:super() then
-    env.pending = false
-    env.run = 0
+    reset(env)
     return 2
   end
   if env.pending then
     env.pending = false
     if is_alpha(code) then
       env.run = 1
-      env.engine:commit_text(" " .. string.char(code))
-      return 1
+      local ch = string.char(code)
+      -- 大写锁定时打出的大写字母（EXAMPLE.COM）按小写看待
+      local lowerish = is_lower(code) or key:caps()
+      -- 逗号后、或句点后接大写字母且不像网址：补空格，开始新的一串
+      if not env.pending_dot or (not lowerish and not env.pending_url) then
+        env.tok = ch
+        env.engine:commit_text(" " .. ch)
+        return 1
+      end
+      -- 句点后接小写字母 / 明显是网址：不补空格，这串字符继续（example.c…）
+      env.tok = env.tok .. ch
+      return 2
     end
   end
   if code == 0x2e then
     env.pending = env.run >= 2
+    env.pending_dot = true
+    env.pending_url = looks_like_url(env.tok)
+    env.tok = env.tok .. "."
     env.run = 0
     return 2
   end
   if code == 0x2c then
     env.pending = env.run >= 1
+    env.pending_dot = false
+    env.pending_url = false
+    env.tok = ""
     env.run = 0
     return 2
   end
   if is_alpha(code) then
     env.run = env.run + 1
+    env.tok = env.tok .. string.char(code)
+  elseif is_token_char(code) then
+    env.run = 0
+    env.tok = env.tok .. string.char(code)
   else
     env.run = 0
+    env.tok = ""
   end
+  if #env.tok > 64 then env.tok = string.sub(env.tok, -64) end
   return 2
 end
 
